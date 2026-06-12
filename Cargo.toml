@@ -1,0 +1,16 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2024"
+description = "notpauca.github.io site"
+repository = "https://github.com/notpauca/notpauca.github.io"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2.91"
+wasm-bindgen-futures = "0.4.73"
+web-sys = { version = "0.3.100", features = ["KeyboardEvent", "Window", "Document", "MouseEvent", "console", "HtmlCanvasElement", "DomRect"] }
+
+wgpu = "29.0.3"
