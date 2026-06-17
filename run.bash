@@ -12,4 +12,4 @@ check() {
 check wasm-pack
 check python3
 
-wasm-pack build --target web && python3 -m http.server 8000
+wasm-pack build --dev --target web && python3 -m http.server 8000

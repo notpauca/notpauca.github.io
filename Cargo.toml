@@ -11,6 +11,21 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = "0.2.91"
 wasm-bindgen-futures = "0.4.73"
-web-sys = { version = "0.3.100", features = ["KeyboardEvent", "Window", "Document", "MouseEvent", "console", "HtmlCanvasElement", "DomRect"] }
-
 wgpu = "29.0.3"
+cgmath = "0.18.0"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+
+#removed from "normal" dependency list, as that feature list is too long
+[dependencies.web-sys]
+version = "0.3.100"
+features = [
+    "KeyboardEvent",
+    "Window",
+    "Document",
+    "MouseEvent",
+    "console",
+    "HtmlCanvasElement",
+    "DomRect",
+    "ResizeObserver",
+    "DateTimeValue"
+]
