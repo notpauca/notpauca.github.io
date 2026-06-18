@@ -1,9 +1,18 @@
 use std::{error::Error, cell::RefCell, rc::Rc, collections::HashSet};
+use cgmath::{perspective, Deg, InnerSpace, Matrix4, Point3, Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
 use wgpu::util::DeviceExt;
 
 const CANVAS_ID: &'static str = "canvas";
+const SHADER_FILE_PATH: &'static str = "./src/shaders.wgsl";
+
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
+    cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
+    cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
+    cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
+    cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
+);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -23,10 +32,24 @@ impl Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Default)]
+struct CameraUniform {
+    view_proj: [[f32; 4]; 4]
+}
+
+impl CameraUniform {
+    fn new(mat: Matrix4<f32>) -> Self {
+        Self {
+            view_proj: mat.into()
+        }
+    }
+}
+
+
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<KeyboardInputSystem>>,
-    watcher: Rc<RefCell<Watcher>>,
     vertices: Vec<Vertex>, //TODO: maybe make a proper mesh class, let that do the GPU memory buffer stuff?
     indices: Vec<[u16; 3]>
 }
@@ -48,22 +71,61 @@ impl PortfolioApp {
         ];
 
         Self {
-            keyboard_input: Rc::new(RefCell::new(KeyboardInputSystem::default())),
             rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, &vertices, &indices).await)),
-            watcher: Rc::new(RefCell::new(Watcher::default())),
+            keyboard_input: Rc::new(RefCell::new(KeyboardInputSystem::default())),
             vertices, indices
         }
     }
 
     fn update(&self, dt: f64) {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
-        self.keyboard_input.borrow_mut().update(&mut *self.watcher.borrow_mut(), dt);
+        self.keyboard_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
     }
 }
 
-#[derive(Default, Debug)]
-struct Watcher {
-    x: f64, y: f64, z: f64,
+#[derive(Debug)]
+struct Camera {
+    position: Point3<f32>,
+    yaw: Rad<f32>,
+    pitch: Rad<f32>,
+    aspect: f32,
+    fov: f32,
+    near: f32,
+    far: f32,
+}
+
+impl Camera {
+    pub fn new(aspect: f32) -> Self {
+        Self {
+            position: (0.0, 5.0, 10.0).into(),
+            yaw: Deg(-90.0).into(),
+            pitch: Deg(-20.0).into(),
+            aspect,
+            fov: 45.0,
+            near: 0.1,
+            far: 100.0,
+        }
+    }
+
+    pub fn calc_projection_matrix(&self) -> Matrix4<f32> {
+        let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
+
+        let view = Matrix4::look_to_rh(
+            self.position,
+            Vector3::new(
+                cos_pitch * cos_yaw,
+                sin_pitch,
+                cos_pitch * sin_yaw
+            ).normalize(),
+            Vector3::unit_y(),
+        );
+
+
+        let proj = perspective(Deg(self.fov), self.aspect, self.near, self.far);
+
+        OPENGL_TO_WGPU_MATRIX * proj * view
+    }
 }
 
 
@@ -86,14 +148,36 @@ impl KeyboardInputSystem {
         }
     }
 
-    fn update(&mut self, watcher: &mut Watcher, dt: f64) {
-        if self.keys.contains("KeyW") { //TODO: actual FPS-like movement for watcher
-            watcher.x+=dt*0.01;
+    fn update(&mut self, camera: &mut Camera, dt: f64) {
+        let mut movement_vector: Vector3<f32> = (0.0, 0.0, 0.0).into();
+
+        if self.keys.contains("KeyD") {
+            movement_vector.x+=1.0;
+        }
+        if self.keys.contains("KeyA") {
+            movement_vector.x-=1.0;
+        }
+        if self.keys.contains("KeyW") {
+            movement_vector.z-=1.0;
+        }
+        if self.keys.contains("KeyS") {
+            movement_vector.z+=1.0;
+        }
+        if self.keys.contains("Space") {
+            movement_vector.y+=1.0;
+        }
+        if self.keys.contains("ShiftLeft") || self.keys.contains("ShiftRight") {
+            movement_vector.y-=1.0;
         }
 
         if self.keys.contains("Enter") {
-            web_sys::console::info_1(&format!("{watcher:?}").into())
+            web_sys::console::info_1(&format!("{camera:?}").into())
         }
+
+        // let movement_vector: Point3<f32> = movement_vector.normalize();
+
+        camera.position += movement_vector * dt as f32 * 0.01;
+
     }
 }
 
@@ -106,6 +190,10 @@ struct RenderingStruct {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup
 }
 
 impl RenderingStruct {
@@ -171,53 +259,6 @@ impl RenderingStruct {
 
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl")); //TODO: dynamically load this file?
 
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
-                immediate_size: 0,
-            });
-
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"), // 1.
-                buffers: &[
-                    Vertex::desc()
-                ], // 2.
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState { // 3.
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
-
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
@@ -234,8 +275,104 @@ impl RenderingStruct {
             }
         );
 
+        let aspect = {
+            let rect = canvas.get_bounding_client_rect();
+            (rect.width()/rect.height()) as f32
+        };
+
+        let camera = Camera::new(aspect);
+
+        let camera_uniform = CameraUniform::new(camera.calc_projection_matrix());
+        // let camera_uniform = CameraUniform::new(Matrix4::from_value(1.0));
+
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera uniform buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+            }
+        );
+
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("camera_bind_group_layout"),
+        });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("camera_bind_group"),
+        });
+
+        let render_pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&camera_bind_group_layout),
+                ],
+                immediate_size: 0,
+            }
+        );
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    Vertex::desc()
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                // cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
-            surface, device, queue, canvas, config, render_pipeline, vertex_buffer, index_buffer
+            surface, device, queue, canvas, config, render_pipeline, vertex_buffer, index_buffer, camera, camera_uniform, camera_buffer, camera_bind_group,
         }
     }
 
@@ -254,13 +391,20 @@ impl RenderingStruct {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+
+        self.camera.aspect = width as f32/height as f32;
+        self.camera_uniform = CameraUniform::new(self.camera.calc_projection_matrix());
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
     }
 
-    fn render(&self) -> Result<(), Box<dyn Error>> {
+    fn render(&mut self) -> Result<(), Box<dyn Error>> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             _ => panic!("Can't get surface texture!")
         };
+
+        self.camera_uniform = CameraUniform::new(self.camera.calc_projection_matrix());
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -293,6 +437,7 @@ impl RenderingStruct {
                 },
             );
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..9, 0, 0..1);
@@ -317,7 +462,7 @@ pub async fn main() -> Result<(), JsValue> {
         let app_for_callback = app.rendering_struct.clone();
         let closure = Closure::wrap(Box::new(move || {
             app_for_callback.borrow_mut().resize();
-            app_for_callback.borrow().render().unwrap();
+            // app_for_callback.borrow_mut().render().unwrap();
         }) as Box<dyn FnMut()>);
 
         web_sys::window()
@@ -367,7 +512,7 @@ pub async fn main() -> Result<(), JsValue> {
             let current_time = Date::now();
             app.update(current_time-time);
             time = current_time;
-            app.rendering_struct.borrow().render().unwrap();
+            app.rendering_struct.borrow_mut().render().unwrap();
             web_sys::window().unwrap()
                 .request_animation_frame(
                     f.borrow()
