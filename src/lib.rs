@@ -78,6 +78,7 @@ impl TimeUniform {
     }
 }
 
+//TODO: handle mouse input, as angle is only controlled with arrow keys for now.
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<KeyboardInputSystem>>,
@@ -88,11 +89,11 @@ struct PortfolioApp {
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
         let vertices = vec![
-            Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] }, // A
-            Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0] }, // B
-            Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0] }, // C
-            Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0] }, // D
-            Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0] }, // E
+            Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] },
+            Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0] },
+            Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0] },
+            Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0] },
+            Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0] },
         ];
 
         let indices = vec![
@@ -128,9 +129,9 @@ struct Camera {
 impl Camera {
     pub fn new(aspect: f32) -> Self {
         Self {
-            position: (0.0, 5.0, 10.0).into(),
+            position: (0.0, 0.0, 10.0).into(),
             yaw: Deg(-90.0).into(),
-            pitch: Deg(-20.0).into(),
+            pitch: Deg(0.0).into(),
             aspect,
             fov: 45.0,
             near: 0.1,
@@ -179,35 +180,56 @@ impl KeyboardInputSystem {
     }
 
     fn update(&mut self, camera: &mut Camera, dt: f64) {
-        let mut movement_vector: Vector3<f32> = (0.0, 0.0, 0.0).into();
+        let (mut right, mut up, mut forward) = (0.0, 0.0, 0.0);
 
+        //camera eye
         if self.keys.contains("KeyD") {
-            movement_vector.x+=1.0;
+            right +=1.0;
         }
         if self.keys.contains("KeyA") {
-            movement_vector.x-=1.0;
+            right -=1.0;
         }
         if self.keys.contains("KeyW") {
-            movement_vector.z-=1.0;
+            forward +=1.0;
         }
         if self.keys.contains("KeyS") {
-            movement_vector.z+=1.0;
+            forward -=1.0;
         }
         if self.keys.contains("Space") {
-            movement_vector.y+=1.0;
+            up+=1.0;
         }
         if self.keys.contains("ShiftLeft") || self.keys.contains("ShiftRight") {
-            movement_vector.y-=1.0;
+            up-=1.0;
         }
+
+        //camera angle
+        if self.keys.contains("ArrowRight") {
+            camera.yaw+=Rad(0.001*dt as f32);
+        }
+        if self.keys.contains("ArrowLeft") {
+            camera.yaw-=Rad(0.001*dt as f32);
+        }
+        if self.keys.contains("ArrowUp") {
+            camera.pitch+=Rad(0.001*dt as f32);
+        }
+        if self.keys.contains("ArrowDown") {
+            camera.pitch-=Rad(0.001*dt as f32);
+        }
+
 
         if self.keys.contains("Enter") {
             web_sys::console::info_1(&format!("{camera:?}").into())
         }
 
-        // let movement_vector: Point3<f32> = movement_vector.normalize();
+        let (yaw_sin, yaw_cos) = camera.yaw.0.sin_cos();
 
-        camera.position += movement_vector * dt as f32 * 0.01;
-
+        //https://sotrh.github.io/learn-wgpu/intermediate/tutorial12-camera/#the-camera-controller
+        //too lazy to remember the right math, so just stole it.
+        let forward_vector = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
+        let right_vector = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+        camera.position += forward_vector * forward * 0.01 * dt as f32;
+        camera.position += right_vector * right * 0.01 * dt as f32;
+        camera.position.y +=up*0.01*dt as f32;
     }
 }
 
@@ -321,7 +343,6 @@ impl RenderingStruct {
         let camera = Camera::new(aspect);
 
         let camera_uniform = CameraUniform::new(camera.calc_projection_matrix());
-        // let camera_uniform = CameraUniform::new(Matrix4::from_value(1.0));
 
         let camera_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -531,7 +552,7 @@ impl RenderingStruct {
 pub async fn main() -> Result<(), JsValue> {
     let canvas = web_sys::window().unwrap()
         .document().unwrap()
-        .get_element_by_id(CANVAS_ID).expect("Can't get canvas, maybe change CANVAS_ID?"); //gotta draw to it now!
+        .get_element_by_id(CANVAS_ID).expect("Can't get canvas, maybe change CANVAS_ID?");
     let canvas = canvas.dyn_into::<HtmlCanvasElement>()?;
 
     let app = PortfolioApp::new(canvas).await;
@@ -567,7 +588,7 @@ pub async fn main() -> Result<(), JsValue> {
         closure.forget();
     }
 
-    //callback for when key's released, as "keydown" acts as if the player's using a textbox and holding a button
+    //callback for when key's released, as using just "keydown" is as if the player's using a textbox and holding a letter key
     {
         let watcher_for_callback = app.keyboard_input.clone();
         let closure = Closure::wrap(Box::new(move |event| {
