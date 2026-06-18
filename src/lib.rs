@@ -1,4 +1,4 @@
-use std::{error::Error, cell::RefCell, rc::Rc, collections::HashSet};
+use std::{error::Error, cell::RefCell, rc::Rc, collections::HashSet, borrow::Cow};
 use cgmath::{perspective, Deg, InnerSpace, Matrix4, Point3, Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
@@ -45,6 +45,21 @@ impl CameraUniform {
         }
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Default)]
+struct TimeUniform {
+    time: f32
+}
+
+impl TimeUniform {
+    fn new() -> Self {
+        Self {
+            time: 0f32
+        }
+    }
+}
+
 
 
 struct PortfolioApp {
@@ -193,7 +208,10 @@ struct RenderingStruct {
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup
+    camera_bind_group: wgpu::BindGroup,
+    time_uniform: TimeUniform,
+    time_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup
 }
 
 impl RenderingStruct {
@@ -257,7 +275,11 @@ impl RenderingStruct {
             &config,
         );
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl")); //TODO: dynamically load this file?
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shaders.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders.wgsl"))),
+        }); //TODO: dynamically load this file / fetch it?
+
 
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
@@ -320,11 +342,47 @@ impl RenderingStruct {
             label: Some("camera_bind_group"),
         });
 
+        let time_uniform = TimeUniform::new();
+
+        let time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Time buffer"),
+            contents: bytemuck::cast_slice(&[time_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let time_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("time_bind_group_layout"),
+        });
+
+        let time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &time_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: time_buffer.as_entire_binding(),
+                }
+            ],
+            label: Some("time_bind_group"),
+        });
+
         let render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&camera_bind_group_layout),
+                    Some(&time_bind_group_layout),
                 ],
                 immediate_size: 0,
             }
@@ -372,7 +430,7 @@ impl RenderingStruct {
         });
 
         Self {
-            surface, device, queue, canvas, config, render_pipeline, vertex_buffer, index_buffer, camera, camera_uniform, camera_buffer, camera_bind_group,
+            surface, device, queue, canvas, config, render_pipeline, vertex_buffer, index_buffer, camera, camera_uniform, camera_buffer, camera_bind_group, time_uniform, time_buffer, time_bind_group
         }
     }
 
@@ -397,7 +455,7 @@ impl RenderingStruct {
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
     }
 
-    fn render(&mut self) -> Result<(), Box<dyn Error>> {
+    fn render(&mut self, dt: f64) -> Result<(), Box<dyn Error>> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             _ => panic!("Can't get surface texture!")
@@ -405,6 +463,9 @@ impl RenderingStruct {
 
         self.camera_uniform = CameraUniform::new(self.camera.calc_projection_matrix());
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+
+        self.time_uniform.time+=dt as f32;
+        self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[self.time_uniform]));
 
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -438,6 +499,7 @@ impl RenderingStruct {
             );
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.time_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..9, 0, 0..1);
@@ -510,9 +572,10 @@ pub async fn main() -> Result<(), JsValue> {
         let g = f.clone();
         *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
             let current_time = Date::now();
-            app.update(current_time-time);
+            let dt = current_time-time;
             time = current_time;
-            app.rendering_struct.borrow_mut().render().unwrap();
+            app.update(dt);
+            app.rendering_struct.borrow_mut().render(dt).unwrap();
             web_sys::window().unwrap()
                 .request_animation_frame(
                     f.borrow()
