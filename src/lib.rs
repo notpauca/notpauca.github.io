@@ -1,11 +1,29 @@
 use std::{error::Error, cell::RefCell, rc::Rc, collections::HashSet, borrow::Cow};
 use cgmath::{perspective, Deg, InnerSpace, Matrix4, Point3, Rad, Vector3};
 use wasm_bindgen::prelude::*;
-use web_sys::{HtmlCanvasElement, js_sys::Date};
+use web_sys::{HtmlCanvasElement, js_sys::Date, Request, RequestInit};
 use wgpu::util::DeviceExt;
 
 const CANVAS_ID: &'static str = "canvas";
-const SHADER_FILE_PATH: &'static str = "./src/shaders.wgsl";
+const SHADER_FILE_PATH: &'static str = "src/shaders.wgsl";
+
+async fn get_shader_source() -> Result<String, JsValue> {
+    let shader_source_request = RequestInit::new();
+    shader_source_request.set_method("GET");
+    shader_source_request.set_mode(web_sys::RequestMode::Cors);
+
+    let request = Request::new_with_str_and_init(SHADER_FILE_PATH, &shader_source_request)?;
+
+    request.headers()
+        .set("Accept", "text/wgsl")?;
+
+    let resp_value = web_sys::window().unwrap().fetch_with_request(&request).await?;
+    assert!(resp_value.is_instance_of::<web_sys::Response>());
+    let resp_value = resp_value.dyn_into::<web_sys::Response>()?;
+    let res = resp_value.text()?.await?;
+    Ok(res.as_string().unwrap())
+}
+
 
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
     cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
@@ -59,8 +77,6 @@ impl TimeUniform {
         }
     }
 }
-
-
 
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
@@ -142,7 +158,6 @@ impl Camera {
         OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
-
 
 #[derive(Default)]
 #[repr(transparent)]
@@ -275,11 +290,12 @@ impl RenderingStruct {
             &config,
         );
 
+        let shader_source = get_shader_source().await.expect("Can't get shader source!");
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shaders.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders.wgsl"))),
-        }); //TODO: dynamically load this file / fetch it?
-
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source)),
+        });
 
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {

@@ -27,5 +27,11 @@ features = [
     "HtmlCanvasElement",
     "DomRect",
     "ResizeObserver",
-    "DateTimeValue"
+    "DateTimeValue",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "ReadableStream",
+    "Headers"
 ]
