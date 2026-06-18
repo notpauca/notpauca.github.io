@@ -82,6 +82,7 @@ impl TimeUniform {
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<KeyboardInputSystem>>,
+    mouse_input: Rc<RefCell<MouseInputSystem>>,
     vertices: Vec<Vertex>, //TODO: maybe make a proper mesh class, let that do the GPU memory buffer stuff?
     indices: Vec<[u16; 3]>
 }
@@ -105,6 +106,7 @@ impl PortfolioApp {
         Self {
             rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, &vertices, &indices).await)),
             keyboard_input: Rc::new(RefCell::new(KeyboardInputSystem::default())),
+            mouse_input: Rc::new(RefCell::new(MouseInputSystem::default())),
             vertices, indices
         }
     }
@@ -112,6 +114,7 @@ impl PortfolioApp {
     fn update(&self, dt: f64) {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
         self.keyboard_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
+        self.mouse_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
     }
 }
 
@@ -230,6 +233,39 @@ impl KeyboardInputSystem {
         camera.position += forward_vector * forward * 0.01 * dt as f32;
         camera.position += right_vector * right * 0.01 * dt as f32;
         camera.position.y +=up*0.01*dt as f32;
+    }
+}
+
+#[derive(Default)]
+struct MouseInputSystem {
+    mouse_movement_delta: (f32, f32),
+    mouse_locked: bool
+}
+
+impl MouseInputSystem {
+    fn mouse_moved(&mut self, event: web_sys::PointerEvent) {
+        if self.mouse_locked {
+            self.mouse_movement_delta = (event.movement_x() as f32, event.movement_y() as f32);
+        }
+    }
+
+    fn update(&mut self, camera: &mut Camera, dt: f64) {
+        camera.pitch+=Deg(-self.mouse_movement_delta.1).into();
+        camera.yaw+=Deg(self.mouse_movement_delta.0).into();
+        self.mouse_movement_delta = (0.0, 0.0);
+    }
+
+    fn mouse_clicked(&mut self, event: web_sys::PointerEvent) {
+        self.mouse_locked = !self.mouse_locked;
+        if self.mouse_locked {
+            web_sys::window().unwrap()
+                .document().unwrap()
+                .get_element_by_id(CANVAS_ID).unwrap()
+                .request_pointer_lock();
+        } else {
+            web_sys::window().unwrap()
+                .document().unwrap().exit_pointer_lock()
+        }
     }
 }
 
@@ -598,6 +634,34 @@ pub async fn main() -> Result<(), JsValue> {
         web_sys::window()
             .unwrap()
             .set_onkeyup(Some(closure.as_ref().unchecked_ref()));
+
+        closure.forget();
+    }
+
+    //callback for mouse movement actions
+    {
+        let watcher_for_callback = app.mouse_input.clone();
+        let closure = Closure::wrap(Box::new(move |event| {
+            watcher_for_callback.borrow_mut().mouse_moved(event);
+        }) as Box<dyn FnMut(web_sys::PointerEvent)>);
+
+        web_sys::window()
+            .unwrap()
+            .set_onpointermove(Some(closure.as_ref().unchecked_ref()));
+
+        closure.forget();
+    }
+
+    //callback for mouse movement actions
+    {
+        let watcher_for_callback = app.mouse_input.clone();
+        let closure = Closure::wrap(Box::new(move |event| {
+            watcher_for_callback.borrow_mut().mouse_clicked(event);
+        }) as Box<dyn FnMut(web_sys::PointerEvent)>);
+
+        web_sys::window()
+            .unwrap()
+            .set_onpointerdown(Some(closure.as_ref().unchecked_ref()));
 
         closure.forget();
     }

@@ -22,7 +22,6 @@ features = [
     "KeyboardEvent",
     "Window",
     "Document",
-    "MouseEvent",
     "console",
     "HtmlCanvasElement",
     "DomRect",
@@ -32,6 +31,6 @@ features = [
     "RequestInit",
     "RequestMode",
     "Response",
-    "ReadableStream",
-    "Headers"
+    "Headers",
+    "PointerEvent"
 ]
