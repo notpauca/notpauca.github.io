@@ -36,11 +36,11 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    color: [f32; 4],
 }
 
 impl Vertex {
-    const ATTRIBS: &[wgpu::VertexAttribute; 2] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+    const ATTRIBS: &[wgpu::VertexAttribute; 2] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
@@ -78,7 +78,6 @@ impl TimeUniform {
     }
 }
 
-//TODO: handle mouse input, as angle is only controlled with arrow keys for now.
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<KeyboardInputSystem>>,
@@ -91,11 +90,11 @@ impl PortfolioApp {
         meshes.push_back(
             (
                 vec![
-                    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] },
-                    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0] },
-                    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0] },
-                    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0] },
-                    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0] },
+                    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0, 1.0] },
+                    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
+                    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0, 1.0] },
+                    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0, 1.0] },
+                    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0, 1.0] },
                 ],
                 vec![
                     [ 0, 1, 4 ],
@@ -107,11 +106,11 @@ impl PortfolioApp {
         meshes.push_back(
             (
                 vec![
-                    Vertex { position: [-0.0868241, 1.49240386, 1.0], color: [1.0, 0.0, 0.0] },
-                    Vertex { position: [-0.49513406, 1.06958647, 1.0], color: [0.0, 1.0, 0.0] },
-                    Vertex { position: [-0.21918549, -1.44939706, 1.0], color: [0.0, 0.0, 1.0] },
-                    Vertex { position: [0.35966998, -1.3473291, 1.0], color: [0.0, 1.0, 1.0] },
-                    Vertex { position: [0.44147372, 1.2347359, 1.0], color: [1.0, 1.0, 0.0] },
+                    Vertex { position: [-0.0868241, 1.49240386, 1.0], color: [1.0, 0.0, 0.0, 0.5] },
+                    Vertex { position: [-0.49513406, 1.06958647, 1.0], color: [0.0, 1.0, 0.0, 0.5] },
+                    Vertex { position: [-0.21918549, -1.44939706, 1.0], color: [0.0, 0.0, 1.0, 0.5] },
+                    Vertex { position: [0.35966998, -1.3473291, 1.0], color: [0.0, 1.0, 1.0, 0.5] },
+                    Vertex { position: [0.44147372, 1.2347359, 1.0], color: [1.0, 1.0, 0.0, 0.5] },
                 ],
                 vec![
                     [ 1, 4, 0 ],
@@ -506,7 +505,7 @@ impl RenderingStruct {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
