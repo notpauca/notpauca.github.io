@@ -1,4 +1,4 @@
-use std::{error::Error, cell::RefCell, rc::Rc, collections::HashSet, borrow::Cow};
+use std::{error::Error, cell::RefCell, rc::Rc, collections::{HashSet, LinkedList}, borrow::Cow};
 use cgmath::{perspective, Deg, InnerSpace, Matrix4, Point3, Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date, Request, RequestInit};
@@ -83,38 +83,55 @@ struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<KeyboardInputSystem>>,
     mouse_input: Rc<RefCell<MouseInputSystem>>,
-    vertices: Vec<Vertex>, //TODO: maybe make a proper mesh class, let that do the GPU memory buffer stuff?
-    indices: Vec<[u16; 3]>
 }
 
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
-        let vertices = vec![
-            Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] },
-            Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0] },
-            Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0] },
-            Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0] },
-            Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0] },
-        ];
-
-        let indices = vec![
-            [ 0, 1, 4 ],
-            [ 1, 2, 4 ],
-            [ 2, 3, 4 ],
-        ];
+        let mut meshes = LinkedList::new();
+        meshes.push_back(
+            (
+                vec![
+                    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] },
+                    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0] },
+                    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0] },
+                    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0] },
+                    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0] },
+                ],
+                vec![
+                    [ 0, 1, 4 ],
+                    [ 1, 2, 4 ],
+                    [ 2, 3, 4 ],
+                ]
+            )
+        );
+        meshes.push_back(
+            (
+                vec![
+                    Vertex { position: [-0.0868241, 1.49240386, 1.0], color: [1.0, 0.0, 0.0] },
+                    Vertex { position: [-0.49513406, 1.06958647, 1.0], color: [0.0, 1.0, 0.0] },
+                    Vertex { position: [-0.21918549, -1.44939706, 1.0], color: [0.0, 0.0, 1.0] },
+                    Vertex { position: [0.35966998, -1.3473291, 1.0], color: [0.0, 1.0, 1.0] },
+                    Vertex { position: [0.44147372, 1.2347359, 1.0], color: [1.0, 1.0, 0.0] },
+                ],
+                vec![
+                    [ 1, 4, 0 ],
+                    [ 2, 4, 1 ],
+                    [ 3, 4, 2 ],
+                ]
+            )
+        );
 
         Self {
-            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, &vertices, &indices).await)),
+            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, meshes).await)),
             keyboard_input: Rc::new(RefCell::new(KeyboardInputSystem::default())),
             mouse_input: Rc::new(RefCell::new(MouseInputSystem::default())),
-            vertices, indices
         }
     }
 
     fn update(&self, dt: f64) {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
         self.keyboard_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
-        self.mouse_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
+        self.mouse_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera);
     }
 }
 
@@ -232,7 +249,7 @@ impl KeyboardInputSystem {
         let right_vector = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
         camera.position += forward_vector * forward * 0.01 * dt as f32;
         camera.position += right_vector * right * 0.01 * dt as f32;
-        camera.position.y +=up*0.01*dt as f32;
+        camera.position.y += up * 0.01 * dt as f32;
     }
 }
 
@@ -249,14 +266,17 @@ impl MouseInputSystem {
         }
     }
 
-    fn update(&mut self, camera: &mut Camera, dt: f64) {
-        camera.pitch+=Deg(-self.mouse_movement_delta.1).into();
-        camera.yaw+=Deg(self.mouse_movement_delta.0).into();
+    fn update(&mut self, camera: &mut Camera) {
+        camera.pitch += Deg(-self.mouse_movement_delta.1).into();
+        camera.yaw += Deg(self.mouse_movement_delta.0).into();
         self.mouse_movement_delta = (0.0, 0.0);
     }
 
     fn mouse_clicked(&mut self, event: web_sys::PointerEvent) {
         self.mouse_locked = !self.mouse_locked;
+        if event.button() != 0 { //mouseEvent.button reference: https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button
+            return;
+        }
         if self.mouse_locked {
             web_sys::window().unwrap()
                 .document().unwrap()
@@ -269,6 +289,13 @@ impl MouseInputSystem {
     }
 }
 
+struct Mesh {
+    vertices: Vec<Vertex>,
+    indices: Vec<[u16; 3]>,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer
+}
+
 struct RenderingStruct {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -276,8 +303,7 @@ struct RenderingStruct {
     canvas: HtmlCanvasElement,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
+    meshes: LinkedList<Mesh>,
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -288,7 +314,7 @@ struct RenderingStruct {
 }
 
 impl RenderingStruct {
-    async fn new(canvas: HtmlCanvasElement, vertices: &Vec<Vertex>, indices: &Vec<[u16; 3]>) -> Self {
+    async fn new(canvas: HtmlCanvasElement, meshes: LinkedList<(Vec<Vertex>, Vec<[u16;3]>)>) -> Self {
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -355,25 +381,28 @@ impl RenderingStruct {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source)),
         });
 
-        let vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(vertices.as_slice()),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
+        let meshes = meshes.into_iter().map(|(vertices, indices)| {
+            let vertex_buffer = device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(vertices.as_slice()),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }
+            );
 
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index buffer"),
-                contents: bytemuck::cast_slice(indices.as_slice()),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
+            let index_buffer = device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Index buffer"),
+                    contents: bytemuck::cast_slice(indices.as_slice()),
+                    usage: wgpu::BufferUsages::INDEX,
+                }
+            );
+            Mesh {vertices, indices, vertex_buffer, index_buffer}
+        }).collect();
 
         let aspect = {
             let rect = canvas.get_bounding_client_rect();
-            (rect.width()/rect.height()) as f32
+            (rect.width() / rect.height()) as f32
         };
 
         let camera = Camera::new(aspect);
@@ -486,13 +515,13 @@ impl RenderingStruct {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                // cull_mode: None,
+                // cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: None, //TODO: implement depth
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -503,7 +532,7 @@ impl RenderingStruct {
         });
 
         Self {
-            surface, device, queue, canvas, config, render_pipeline, vertex_buffer, index_buffer, camera, camera_uniform, camera_buffer, camera_bind_group, time_uniform, time_buffer, time_bind_group
+            surface, device, queue, canvas, config, render_pipeline, meshes, camera, camera_uniform, camera_buffer, camera_bind_group, time_uniform, time_buffer, time_bind_group
         }
     }
 
@@ -573,9 +602,11 @@ impl RenderingStruct {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_bind_group(1, &self.time_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..9, 0, 0..1);
+            for mesh in &self.meshes {
+                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass.draw_indexed(0..9, 0, 0..1);
+            }
         }
 
         self.queue.submit(Some(encoder.finish()));
