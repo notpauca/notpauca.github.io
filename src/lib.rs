@@ -129,8 +129,8 @@ impl PortfolioApp {
 
     fn update(&self, dt: f64) {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
-        self.keyboard_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera, dt);
-        self.mouse_input.borrow_mut().update(&mut self.rendering_struct.borrow_mut().camera);
+        self.keyboard_input.borrow_mut().update(&self, dt);
+        self.mouse_input.borrow_mut().update(&self);
     }
 }
 
@@ -198,8 +198,10 @@ impl KeyboardInputSystem {
         }
     }
 
-    fn update(&mut self, camera: &mut Camera, dt: f64) {
+    fn update(&mut self, app: &PortfolioApp, dt: f64) {
         let (mut right, mut up, mut forward) = (0.0, 0.0, 0.0);
+
+        //TODO: now make bindings for things like movement, let user change them somehow.
 
         //camera eye
         if self.keys.contains("KeyD") {
@@ -222,33 +224,34 @@ impl KeyboardInputSystem {
         }
 
         //camera angle
+        let rendering_struct = &mut app.rendering_struct.borrow_mut();
         if self.keys.contains("ArrowRight") {
-            camera.yaw+=Rad(0.001*dt as f32);
+            rendering_struct.camera.yaw+=Rad(0.001*dt as f32);
         }
         if self.keys.contains("ArrowLeft") {
-            camera.yaw-=Rad(0.001*dt as f32);
+            rendering_struct.camera.yaw-=Rad(0.001*dt as f32);
         }
         if self.keys.contains("ArrowUp") {
-            camera.pitch+=Rad(0.001*dt as f32);
+            rendering_struct.camera.pitch+=Rad(0.001*dt as f32);
         }
         if self.keys.contains("ArrowDown") {
-            camera.pitch-=Rad(0.001*dt as f32);
+            rendering_struct.camera.pitch-=Rad(0.001*dt as f32);
         }
 
 
         if self.keys.contains("Enter") {
-            web_sys::console::info_1(&format!("{camera:?}").into())
+            web_sys::console::info_1(&format!("{:?}", rendering_struct.camera).into())
         }
 
-        let (yaw_sin, yaw_cos) = camera.yaw.0.sin_cos();
+        let (yaw_sin, yaw_cos) = rendering_struct.camera.yaw.0.sin_cos();
 
         //https://sotrh.github.io/learn-wgpu/intermediate/tutorial12-camera/#the-camera-controller
         //too lazy to remember the right math, so just stole it.
         let forward_vector = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
         let right_vector = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
-        camera.position += forward_vector * forward * 0.01 * dt as f32;
-        camera.position += right_vector * right * 0.01 * dt as f32;
-        camera.position.y += up * 0.01 * dt as f32;
+        rendering_struct.camera.position += forward_vector * forward * 0.01 * dt as f32;
+        rendering_struct.camera.position += right_vector * right * 0.01 * dt as f32;
+        rendering_struct.camera.position.y += up * 0.01 * dt as f32;
     }
 }
 
@@ -265,9 +268,10 @@ impl MouseInputSystem {
         }
     }
 
-    fn update(&mut self, camera: &mut Camera) {
-        camera.pitch += Deg(-self.mouse_movement_delta.1).into();
-        camera.yaw += Deg(self.mouse_movement_delta.0).into();
+    fn update(&mut self, app: &PortfolioApp) {
+        let rendering_struct = &mut app.rendering_struct.borrow_mut();
+        rendering_struct.camera.pitch += Deg(-self.mouse_movement_delta.1).into();
+        rendering_struct.camera.yaw += Deg(self.mouse_movement_delta.0).into();
         self.mouse_movement_delta = (0.0, 0.0);
     }
 
