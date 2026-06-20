@@ -295,6 +295,46 @@ struct Mesh {
     index_buffer: wgpu::Buffer
 }
 
+struct DepthTexture {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+}
+
+impl DepthTexture {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth texture"),
+            size: wgpu::Extent3d {
+                width, height,
+                depth_or_array_layers: 1
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(
+            &wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+                compare: Some(wgpu::CompareFunction::Less),
+                lod_min_clamp: 0.0,
+                lod_max_clamp: 100.0,
+                ..Default::default()
+            }
+        );
+        Self {texture, view, sampler}
+    }
+}
+
 struct RenderingStruct {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -309,7 +349,8 @@ struct RenderingStruct {
     camera_bind_group: wgpu::BindGroup,
     time_uniform: TimeUniform,
     time_buffer: wgpu::Buffer,
-    time_bind_group: wgpu::BindGroup
+    time_bind_group: wgpu::BindGroup,
+    depth_texture: DepthTexture
 }
 
 impl RenderingStruct {
@@ -379,6 +420,11 @@ impl RenderingStruct {
             label: Some("shaders.wgsl"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source)),
         });
+
+        let depth_texture = {
+            let rect = canvas.get_bounding_client_rect();
+            DepthTexture::new(&device, rect.width() as u32, rect.height() as u32)
+        };
 
         let meshes = meshes.into_iter().map(|(vertices, indices)| {
             let vertex_buffer = device.create_buffer_init(
@@ -520,7 +566,13 @@ impl RenderingStruct {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None, //TODO: implement depth
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -531,7 +583,7 @@ impl RenderingStruct {
         });
 
         Self {
-            surface, device, queue, canvas, config, render_pipeline, meshes, camera, camera_uniform, camera_buffer, camera_bind_group, time_uniform, time_buffer, time_bind_group
+            surface, device, queue, canvas, config, render_pipeline, meshes, camera, camera_uniform, camera_buffer, camera_bind_group, time_uniform, time_buffer, time_bind_group, depth_texture
         }
     }
 
@@ -554,6 +606,8 @@ impl RenderingStruct {
         self.camera.aspect = width as f32/height as f32;
         self.camera_uniform = CameraUniform::new(self.camera.calc_projection_matrix());
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
+
+        self.depth_texture = DepthTexture::new(&self.device, width, height);
     }
 
     fn render(&mut self, dt: f64) -> Result<(), Box<dyn Error>> {
@@ -592,7 +646,14 @@ impl RenderingStruct {
                             },
                         },
                     )],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                     multiview_mask: None,
@@ -607,6 +668,7 @@ impl RenderingStruct {
                 render_pass.draw_indexed(0..9, 0, 0..1);
             }
         }
+        //TODO: draw fog somewhere xD (using depth texture)
 
         self.queue.submit(Some(encoder.finish()));
         frame.present();
