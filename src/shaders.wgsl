@@ -33,7 +33,7 @@ fn vs_main(
     var out: VertexOutput;
     out.color = srgbToLinear(model.color);
     var new_pos = model.position;
-    new_pos.x += time.time/10000.0;
+    new_pos.x += sin(time.time/10000.0);
     out.clip_position = camera.view_proj * vec4<f32>(new_pos, 1.0);
     return out;
 }
