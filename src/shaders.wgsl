@@ -10,6 +10,12 @@ struct TimeUniform {
 @group(1) @binding(0)
 var<uniform> time: TimeUniform;
 
+struct MeshTranslationUniform {
+    translation_matrix: mat4x4<f32>,
+};
+@group(2) @binding(0)
+var<uniform> mesh_translation: MeshTranslationUniform;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec4<f32>,
@@ -34,7 +40,7 @@ fn vs_main(
     out.color = srgbToLinear(model.color);
     var new_pos = model.position;
     new_pos.x += sin(time.time/10000.0);
-    out.clip_position = camera.view_proj * vec4<f32>(new_pos, 1.0);
+    out.clip_position = camera.view_proj * (mesh_translation.translation_matrix * vec4<f32>(new_pos, 1.0));
     return out;
 }
 

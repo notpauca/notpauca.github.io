@@ -3,11 +3,13 @@ mod consts;
 mod camera;
 mod fetch;
 mod time;
+mod mesh;
 
 use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow};
+use cgmath::{Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
-use wgpu::util::DeviceExt;
+use crate::mesh::{Mesh, UnfinishedMesh};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -27,13 +29,6 @@ impl Vertex {
     }
 }
 
-struct Mesh {
-    vertices: Vec<Vertex>,
-    indices: Vec<[u16; 3]>,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer
-}
-
 struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<systems::KeyboardInput>>,
@@ -42,8 +37,8 @@ struct PortfolioApp {
 
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
-        let mut meshes = LinkedList::new();
-        meshes.push_back(
+        let mut unfinished_meshes = LinkedList::new();
+        unfinished_meshes.push_back(
             (
                 vec![
                     Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0, 1.0] },
@@ -56,10 +51,13 @@ impl PortfolioApp {
                     [0, 1, 4],
                     [1, 2, 4],
                     [2, 3, 4],
-                ]
+                ],
+                Vector3::new(2.0,0.0,0.0),
+                Vector3::new(Rad(0.0),Rad(0.0),Rad(0.0)),
+                Vector3::new(1.0,1.0,1.0)
             )
         );
-        meshes.push_back(
+        unfinished_meshes.push_back(
             (
                 vec![
                     Vertex { position: [-0.0868241, 1.49240386, 1.0], color: [1.0, 0.0, 0.0, 0.5] },
@@ -72,12 +70,15 @@ impl PortfolioApp {
                     [1, 4, 0],
                     [2, 4, 1],
                     [3, 4, 2],
-                ]
+                ],
+                Vector3::new(0.0,0.0,0.0),
+                Vector3::new(Rad(0.0),Rad(0.0),Rad(0.0)),
+                Vector3::new(1.0,1.0,1.0)
             )
         );
 
         Self {
-            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, meshes).await)),
+            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, unfinished_meshes).await)),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
         }
@@ -144,7 +145,7 @@ struct RenderingStruct {
 }
 
 impl RenderingStruct {
-    async fn new(canvas: HtmlCanvasElement, meshes: LinkedList<(Vec<Vertex>, Vec<[u16;3]>)>) -> Self {
+    async fn new(canvas: HtmlCanvasElement, unfinished_meshes: LinkedList<UnfinishedMesh>) -> Self {
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -216,25 +217,6 @@ impl RenderingStruct {
             DepthTexture::new(&device, rect.width() as u32, rect.height() as u32)
         };
 
-        let meshes = meshes.into_iter().map(|(vertices, indices)| {
-            let vertex_buffer = device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("Vertex Buffer"),
-                    contents: bytemuck::cast_slice(vertices.as_slice()),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }
-            );
-
-            let index_buffer = device.create_buffer_init(
-                &wgpu::util::BufferInitDescriptor {
-                    label: Some("Index buffer"),
-                    contents: bytemuck::cast_slice(indices.as_slice()),
-                    usage: wgpu::BufferUsages::INDEX,
-                }
-            );
-            Mesh {vertices, indices, vertex_buffer, index_buffer}
-        }).collect();
-
         let aspect = {
             let rect = canvas.get_bounding_client_rect();
             (rect.width() / rect.height()) as f32
@@ -244,12 +226,33 @@ impl RenderingStruct {
 
         let time = time::Time::new(&device);
 
+        let mesh_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("mesh_bind_group_layout"),
+        });
+
+        let meshes = unfinished_meshes.into_iter().map(|unfinished_mesh| {
+            Mesh::new(unfinished_mesh, &device, &mesh_bind_group_layout)
+        }).collect();
+
         let render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&camera.bind_group_layout),
                     Some(&time.bind_group_layout),
+                    Some(&mesh_bind_group_layout),
                 ],
                 immediate_size: 0,
             }
@@ -340,6 +343,11 @@ impl RenderingStruct {
         self.time.advance(dt as f32);
         self.queue.write_buffer(&self.time.buffer, 0, bytemuck::cast_slice(&[self.time.uniform]));
 
+        for mesh in &mut self.meshes {
+            mesh.update_uniform();
+            self.queue.write_buffer(&mesh.transformation_matrix_buffer, 0, bytemuck::cast_slice(&[mesh.transform_uniform]));
+        }
+
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         {
@@ -377,13 +385,15 @@ impl RenderingStruct {
                     multiview_mask: None,
                 },
             );
+
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera.bind_group, &[]);
             render_pass.set_bind_group(1, &self.time.bind_group, &[]);
-            for mesh in &self.meshes {
+            for mesh in &mut self.meshes {
+                render_pass.set_bind_group(2, &mesh.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..9, 0, 0..1);
+                render_pass.draw_indexed(0..((mesh.indices.len()*3) as u32), 0, 0..1);
             }
         }
 

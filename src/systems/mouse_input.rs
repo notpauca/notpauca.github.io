@@ -27,7 +27,6 @@ impl MouseInputSystem {
         let pitch_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_x(), pitch);
         let roll_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_z(), Rad(0.0));
 
-
         rendering_struct.camera.stats.rotation = roll_quaternion * yaw_quaternion * pitch_quaternion * rendering_struct.camera.stats.rotation;
         self.mouse_movement_delta = (0.0, 0.0);
     }
