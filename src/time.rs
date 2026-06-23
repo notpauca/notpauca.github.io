@@ -1,4 +1,5 @@
 use wgpu::util::DeviceExt;
+use crate::consts;
 
 pub struct Time {
     pub uniform: Uniform,
@@ -16,21 +17,7 @@ impl Time {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }
-            ],
-            label: Some("time_bind_group_layout"),
-        });
+        let bind_group_layout = device.create_bind_group_layout(&consts::TIME_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,

@@ -1,6 +1,6 @@
-use cgmath::{perspective, Deg, Matrix, Matrix4, One, Quaternion, Vector3};
+use cgmath::{perspective, Deg, InnerSpace, Matrix4, Point3, Rad, Vector3};
 use wgpu::util::DeviceExt;
-use crate::consts::OPENGL_TO_WGPU_MATRIX;
+use crate::consts;
 
 pub struct Camera {
     pub stats: Stats,
@@ -23,21 +23,7 @@ impl Camera {
             }
         );
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }
-            ],
-            label: Some("camera_bind_group_layout"),
-        });
+        let bind_group_layout = device.create_bind_group_layout(&consts::CAMERA_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
@@ -71,8 +57,9 @@ impl Camera {
 
 #[derive(Debug)]
 pub struct Stats {
-    pub position: Vector3<f32>,
-    pub rotation: Quaternion<f32>,
+    pub position: Point3<f32>,
+    pub yaw: Rad<f32>,
+    pub pitch: Rad<f32>,
     pub aspect: f32,
     pub fov: f32,
     pub near: f32,
@@ -83,7 +70,8 @@ impl Stats {
     pub fn new(aspect: f32) -> Self {
          Self {
              position: (0.0, 0.0, 10.0).into(),
-             rotation: Quaternion::one(),
+             yaw: Deg(-90.0).into(),
+             pitch: Deg(0.0).into(),
              aspect,
              fov: 45.0,
              near: 0.1,
@@ -92,11 +80,22 @@ impl Stats {
     }
 
     pub fn calc_projection_matrix(&self) -> Matrix4<f32> {
-        let view = Matrix4::from(self.rotation).transpose() * Matrix4::from_translation(-self.position);
+        let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
+
+        let view = Matrix4::look_to_rh(
+            self.position,
+            Vector3::new(
+                cos_pitch * cos_yaw,
+                sin_pitch,
+                cos_pitch * sin_yaw
+            ).normalize(),
+            Vector3::unit_y(),
+        );
 
         let proj = perspective(Deg(self.fov), self.aspect, self.near, self.far);
 
-        OPENGL_TO_WGPU_MATRIX * proj * view
+        consts::OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
 

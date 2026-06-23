@@ -1,4 +1,4 @@
-use cgmath::{Quaternion, Rad, Rotation, Rotation3, Vector3};
+use cgmath::{num_traits::clamp, Rad};
 use crate::{consts, PortfolioApp};
 
 #[derive(Default)]
@@ -18,16 +18,9 @@ impl MouseInputSystem {
         let rendering_struct = &mut app.rendering_struct.borrow_mut();
         let sens = 0.005;
 
-        let up_vector = rendering_struct.camera.stats.rotation.rotate_vector(Vector3::unit_y());
+        rendering_struct.camera.stats.yaw += Rad(self.mouse_movement_delta.0 * sens);
+        rendering_struct.camera.stats.pitch = clamp(rendering_struct.camera.stats.pitch-Rad(self.mouse_movement_delta.1 * sens), Rad(-consts::SAFE_FRAC_PI_2), Rad(consts::SAFE_FRAC_PI_2));
 
-        let yaw = Rad(-self.mouse_movement_delta.0 * sens);
-        let pitch = Rad(-self.mouse_movement_delta.1 * sens);
-
-        let yaw_quaternion = Quaternion::from_axis_angle(up_vector, yaw);
-        let pitch_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_x(), pitch);
-        let roll_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_z(), Rad(0.0));
-
-        rendering_struct.camera.stats.rotation = roll_quaternion * yaw_quaternion * pitch_quaternion * rendering_struct.camera.stats.rotation;
         self.mouse_movement_delta = (0.0, 0.0);
     }
 

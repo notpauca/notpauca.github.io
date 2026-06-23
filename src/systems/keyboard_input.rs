@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use cgmath::{InnerSpace, Quaternion, Rad, Rotation, Rotation3, Vector3};
+use cgmath::{InnerSpace, Rad, Vector3, num_traits::clamp};
 use crate::PortfolioApp;
 
 #[derive(Default)]
@@ -22,74 +22,67 @@ impl KeyboardInputSystem {
     }
 
     pub fn update(&mut self, app: &PortfolioApp, dt: f64) {
+        //TODO(unimportant): abstract the movement logic in the Camera struct, so that I can make a keybind hashtable
         let (mut right, mut up, mut forward) = (0.0, 0.0, 0.0);
 
-        //TODO: now make keybinds for things like movement, let user change them somehow.
-        //TODO: abstract the movement logic in the Camera struct, so that I can make a keybind hashtable
         //camera eye
         if self.keys.contains("KeyD") {
-            right +=1.0;
+            right += 1.0;
         }
         if self.keys.contains("KeyA") {
-            right -=1.0;
+            right -= 1.0;
         }
         if self.keys.contains("KeyW") {
-            forward +=1.0;
+            forward += 1.0;
         }
         if self.keys.contains("KeyS") {
-            forward -=1.0;
+            forward -= 1.0;
         }
         if self.keys.contains("Space") {
-            up+=1.0;
+            up += 1.0;
         }
         if self.keys.contains("ShiftLeft") || self.keys.contains("ShiftRight") {
-            up-=1.0;
+            up -= 1.0;
         }
 
         let rendering_struct = &mut app.rendering_struct.borrow_mut();
-        let mut yaw = 0.0;
-        let mut pitch = 0.0;
-        let mut roll = 0.0;
+        let mut yaw = rendering_struct.camera.stats.yaw;
+        let mut pitch = rendering_struct.camera.stats.pitch;
+
+        //angles
         if self.keys.contains("ArrowRight") {
-            yaw-=0.001 * dt as f32;
+            yaw -= Rad(0.001 * dt as f32);
         }
         if self.keys.contains("ArrowLeft") {
-            yaw+=0.001 * dt as f32;
+            yaw += Rad(0.001 * dt as f32);
         }
         if self.keys.contains("ArrowUp") {
-            pitch+=0.001 * dt as f32;
+            pitch += Rad(0.001 * dt as f32);
         }
         if self.keys.contains("ArrowDown") {
-            pitch-=0.001 * dt as f32;
+            pitch -= Rad(0.001 * dt as f32);
         }
-        if self.keys.contains("KeyE") {
-            roll-=0.001 * dt as f32;
+        rendering_struct.camera.stats.yaw = yaw;
+        rendering_struct.camera.stats.pitch = clamp(pitch, Rad(-crate::consts::SAFE_FRAC_PI_2), Rad(crate::consts::SAFE_FRAC_PI_2));
+
+        //zooming
+        if self.keys.contains("Equal") {
+            rendering_struct.camera.stats.fov = clamp(rendering_struct.camera.stats.fov - (0.05 * dt as f32), 1.0, 179.0);
+
         }
-        if self.keys.contains("KeyQ") {
-            roll+=0.001 * dt as f32;
+        if self.keys.contains("Minus") {
+            rendering_struct.camera.stats.fov = clamp(rendering_struct.camera.stats.fov + (0.05 * dt as f32), 1.0, 179.0);
         }
 
         if self.keys.contains("Enter") {
             web_sys::console::info_1(&format!("{:?}", rendering_struct.camera.stats).into());
         }
 
-        let forward_vector = rendering_struct.camera.stats.rotation.rotate_vector(-Vector3::unit_z());
-        let right_vector = rendering_struct.camera.stats.rotation.rotate_vector(Vector3::unit_x());
-        let up_vector = rendering_struct.camera.stats.rotation.rotate_vector(Vector3::unit_y());
-
-        let yaw_quaternion = Quaternion::from_axis_angle(up_vector, Rad(yaw));
-        let pitch_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_x(), Rad(pitch));
-        let roll_quaternion = Quaternion::from_axis_angle(rendering_struct.camera.stats.rotation*Vector3::unit_z(), Rad(roll));
-
-        rendering_struct.camera.stats.rotation = (roll_quaternion*pitch_quaternion*yaw_quaternion*rendering_struct.camera.stats.rotation).normalize();
-
-        let speed = 0.01;
-        let forward_vector = forward_vector * forward * speed * dt as f32;
-        let right_vector = right_vector * right * speed * dt as f32;
-        let up_vector = up_vector * up * speed * dt as f32;
-
-        rendering_struct.camera.stats.position += forward_vector;
-        rendering_struct.camera.stats.position += right_vector;
-        rendering_struct.camera.stats.position += up_vector;
+        let (yaw_sin, yaw_cos) = rendering_struct.camera.stats.yaw.0.sin_cos();
+        let forward_vector = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
+        let right_vector = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+        rendering_struct.camera.stats.position += forward_vector * forward * 0.01 * dt as f32;
+        rendering_struct.camera.stats.position += right_vector * right * 0.01 * dt as f32;
+        rendering_struct.camera.stats.position.y += up * 0.01 * dt as f32;
     }
 }

@@ -6,7 +6,7 @@ mod time;
 mod mesh;
 
 use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow};
-use cgmath::{Rad, Vector3};
+use cgmath::{Deg, Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
 use crate::mesh::{Mesh, UnfinishedMesh};
@@ -53,7 +53,7 @@ impl PortfolioApp {
                     [2, 3, 4],
                 ],
                 Vector3::new(2.0,0.0,0.0),
-                Vector3::new(Rad(0.0),Rad(0.0),Rad(0.0)),
+                Vector3::new(Rad(0.0), Deg(90.0).into(), Rad(0.0)),
                 Vector3::new(1.0,1.0,1.0)
             )
         );
@@ -226,21 +226,7 @@ impl RenderingStruct {
 
         let time = time::Time::new(&device);
 
-        let mesh_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }
-            ],
-            label: Some("mesh_bind_group_layout"),
-        });
+        let mesh_bind_group_layout = device.create_bind_group_layout(&consts::MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
         let meshes = unfinished_meshes.into_iter().map(|unfinished_mesh| {
             Mesh::new(unfinished_mesh, &device, &mesh_bind_group_layout)
