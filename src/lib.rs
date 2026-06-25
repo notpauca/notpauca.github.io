@@ -324,14 +324,14 @@ impl RenderingStruct {
         };
 
         self.camera.update_uniform();
-        self.queue.write_buffer(&self.camera.buffer, 0, bytemuck::cast_slice(&[self.camera.uniform]));
+        self.camera.write_itself(&self.queue);
 
         self.time.advance(dt as f32);
-        self.queue.write_buffer(&self.time.buffer, 0, bytemuck::cast_slice(&[self.time.uniform]));
+        self.time.write_itself(&self.queue);
 
         for mesh in &mut self.meshes {
             mesh.update_uniform();
-            self.queue.write_buffer(&mesh.transformation_matrix_buffer, 0, bytemuck::cast_slice(&[mesh.transform_uniform]));
+            mesh.write_itself(&self.queue)
         }
 
         let view = frame.texture.create_view(&Default::default());

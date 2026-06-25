@@ -77,4 +77,8 @@ impl Mesh {
         let transform_matrix = Matrix4::from_translation(self.translation) * rotation_matrix * Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
         self.transform_uniform.inner = transform_matrix.into();
     }
+
+    pub fn write_itself(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.transformation_matrix_buffer, 0, bytemuck::cast_slice(&[self.transform_uniform]));
+    }
 }

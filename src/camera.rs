@@ -53,6 +53,10 @@ impl Camera {
         self.stats.aspect = aspect;
         //Don't need to update uniform or write anything to the queue, because that's the RenderingStruct::render() function's job
     }
+
+    pub fn write_itself(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+    }
 }
 
 #[derive(Debug)]

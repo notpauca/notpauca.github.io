@@ -30,7 +30,6 @@ impl Time {
             label: Some("time_bind_group"),
         });
 
-
         Self {
             uniform,
             buffer,
@@ -42,10 +41,14 @@ impl Time {
     pub fn advance(&mut self, dt: f32) {
         self.uniform.time+=dt;
     }
+
+    pub fn write_itself(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+    }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct Uniform {
-    time: f32
+    pub time: f32
 }
