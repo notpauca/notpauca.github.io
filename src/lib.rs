@@ -15,11 +15,12 @@ use crate::mesh::{Mesh, UnfinishedMesh};
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 4],
+    // color: [f32; 4],
+    texture_coords: [f32; 2]
 }
 
 impl Vertex {
-    const ATTRIBS: &[wgpu::VertexAttribute; 2] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+    const ATTRIBS: &[wgpu::VertexAttribute; 2] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
@@ -41,11 +42,11 @@ impl PortfolioApp {
         unfinished_meshes.push_back(
             (
                 vec![
-                    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0, 1.0] },
-                    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.0, 1.0, 0.0, 1.0] },
-                    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 0.0, 1.0, 1.0] },
-                    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 1.0, 1.0, 1.0] },
-                    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 1.0, 0.0, 1.0] },
+                        Vertex { position: [-0.0868241, 0.49240386, 0.0], texture_coords: [0.4131759, 0.99240386] },
+                        Vertex { position: [-0.49513406, 0.06958647, 0.0], texture_coords: [0.0048659444, 0.56958647] },
+                        Vertex { position: [-0.21918549, -0.44939706, 0.0], texture_coords: [0.28081453, 0.05060294] },
+                        Vertex { position: [0.35966998, -0.3473291, 0.0], texture_coords: [0.85967, 0.1526709] },
+                        Vertex { position: [0.44147372, 0.2347359, 0.0], texture_coords: [0.9414737, 0.7347359] },
                 ],
                 vec![
                     [0, 1, 4],
@@ -60,11 +61,11 @@ impl PortfolioApp {
         unfinished_meshes.push_back(
             (
                 vec![
-                    Vertex { position: [-0.0868241, 1.49240386, 1.0], color: [1.0, 0.0, 0.0, 0.5] },
-                    Vertex { position: [-0.49513406, 1.06958647, 1.0], color: [0.0, 1.0, 0.0, 0.5] },
-                    Vertex { position: [-0.21918549, -1.44939706, 1.0], color: [0.0, 0.0, 1.0, 0.5] },
-                    Vertex { position: [0.35966998, -1.3473291, 1.0], color: [0.0, 1.0, 1.0, 0.5] },
-                    Vertex { position: [0.44147372, 1.2347359, 1.0], color: [1.0, 1.0, 0.0, 0.5] },
+                    Vertex { position: [-0.0868241, 1.49240386, 1.0], texture_coords: [0.4131759, 0.99240386] },
+                    Vertex { position: [-0.49513406, 1.06958647, 1.0], texture_coords: [0.0048659444, 0.56958647] },
+                    Vertex { position: [-0.21918549, -1.44939706, 1.0], texture_coords: [0.28081453, 0.05060294] },
+                    Vertex { position: [0.35966998, -1.3473291, 1.0], texture_coords: [0.85967, 0.1526709] },
+                    Vertex { position: [0.44147372, 1.2347359, 1.0], texture_coords: [0.9414737, 0.7347359] },
                 ],
                 vec![
                     [1, 4, 0],
@@ -88,6 +89,86 @@ impl PortfolioApp {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
         self.keyboard_input.borrow_mut().update(&self, dt);
         self.mouse_input.borrow_mut().update(&self);
+    }
+}
+
+struct Texture {
+    image: image::RgbaImage,
+    image_texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler,
+    bind_group: wgpu::BindGroup,
+    bind_group_layout: wgpu::BindGroupLayout
+}
+
+impl Texture {
+    fn new(device: &wgpu::Device) -> Result<Self, Box<dyn Error>> {
+        let image_bytes = include_bytes!("../img/pfp.png");
+        let image = image::load_from_memory(image_bytes)?.to_rgba8();
+        let size = image.dimensions();
+        let image_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("pfp_image_texture"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        } );
+
+        // let texture_view = image_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let view = image_texture.create_view(&Default::default());
+
+        let bind_group_layout = device.create_bind_group_layout(&consts::TEXTURE_BIND_GROUP_LAYOUT_DESCRIPTOR);
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                }
+            ],
+            label: Some("texture_bind_group")
+
+        });
+
+        Ok(Self {image, image_texture, view, sampler, bind_group, bind_group_layout})
+    }
+
+    fn write_itself(&self, queue: &wgpu::Queue) {
+        queue.write_texture(wgpu::TexelCopyTextureInfo {
+            texture: &self.image_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &self.image.as_raw().as_slice(),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4*self.image.width()),
+            rows_per_image: Some(self.image.height())
+        },
+        self.image_texture.size());
     }
 }
 
@@ -139,6 +220,7 @@ struct RenderingStruct {
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
     meshes: LinkedList<Mesh>,
+    texture: Texture,
     camera: camera::Camera,
     time: time::Time,
     depth_texture: DepthTexture
@@ -232,6 +314,8 @@ impl RenderingStruct {
             Mesh::new(unfinished_mesh, &device, &mesh_bind_group_layout)
         }).collect();
 
+        let texture = Texture::new(&device).unwrap();
+
         let render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -239,6 +323,7 @@ impl RenderingStruct {
                     Some(&camera.bind_group_layout),
                     Some(&time.bind_group_layout),
                     Some(&mesh_bind_group_layout),
+                    Some(&texture.bind_group_layout)
                 ],
                 immediate_size: 0,
             }
@@ -292,7 +377,7 @@ impl RenderingStruct {
         });
 
         Self {
-            surface, device, queue, canvas, config, render_pipeline, meshes, camera, time, depth_texture
+            surface, device, queue, canvas, config, render_pipeline, meshes, texture, camera, time, depth_texture
         }
     }
 
@@ -330,9 +415,15 @@ impl RenderingStruct {
         self.time.write_itself(&self.queue);
 
         for mesh in &mut self.meshes {
+            mesh.scale += Vector3::new(
+                (self.time.uniform.time/1000.0).sin()*0.01,
+                (self.time.uniform.time/1000.0).sin()*0.01,
+                (self.time.uniform.time/1000.0).sin()*0.01,);
             mesh.update_uniform();
             mesh.write_itself(&self.queue)
         }
+
+        self.texture.write_itself(&self.queue);
 
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -377,6 +468,7 @@ impl RenderingStruct {
             render_pass.set_bind_group(1, &self.time.bind_group, &[]);
             for mesh in &mut self.meshes {
                 render_pass.set_bind_group(2, &mesh.bind_group, &[]);
+                render_pass.set_bind_group(3, &self.texture.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 render_pass.draw_indexed(0..((mesh.indices.len()*3) as u32), 0, 0..1);

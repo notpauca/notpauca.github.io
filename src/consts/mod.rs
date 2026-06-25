@@ -3,6 +3,8 @@ pub mod bind_group_layouts;
 pub use bind_group_layouts::CAMERA as CAMERA_BIND_GROUP_LAYOUT_DESCRIPTOR;
 pub use bind_group_layouts::TIME as TIME_BIND_GROUP_LAYOUT_DESCRIPTOR;
 pub use bind_group_layouts::MESH_TRANSFORM as MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR;
+pub use bind_group_layouts::TEXTURE as TEXTURE_BIND_GROUP_LAYOUT_DESCRIPTOR;
+
 
 pub const CANVAS_ID: &'static str = "canvas";
 pub const SHADER_FILE_PATH: &'static str = "src/shaders.wgsl";
