@@ -51,10 +51,10 @@ impl KeyboardInputSystem {
 
         //angles
         if self.keys.contains("ArrowRight") {
-            yaw -= Rad(0.001 * dt as f32);
+            yaw += Rad(0.001 * dt as f32);
         }
         if self.keys.contains("ArrowLeft") {
-            yaw += Rad(0.001 * dt as f32);
+            yaw -= Rad(0.001 * dt as f32);
         }
         if self.keys.contains("ArrowUp") {
             pitch += Rad(0.001 * dt as f32);
