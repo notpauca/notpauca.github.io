@@ -3,13 +3,27 @@ mod consts;
 mod camera;
 mod fetch;
 mod time;
-mod mesh;
+mod model;
 
-use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow};
-use cgmath::Vector3;
+use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow, f32::consts::FRAC_PI_2};
+use cgmath::{Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
-use crate::mesh::Mesh;
+
+const SCENE: &[model::Unfinished] = &[
+    (
+        "monkey.obj",
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(Rad(0.0), Rad(FRAC_PI_2), Rad(0.0)),
+        Vector3::new(1.0, 1.0, 1.0)
+    ),
+    (
+        "monkey.obj",
+        Vector3::new(5.0, 0.0, 0.0),
+        Vector3::new(Rad(0.0), Rad(0.0), Rad(0.0)),
+        Vector3::new(1.0, 1.0, 1.0)
+    )
+];
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -34,6 +48,7 @@ struct PortfolioApp {
     rendering_struct: Rc<RefCell<RenderingStruct>>,
     keyboard_input: Rc<RefCell<systems::KeyboardInput>>,
     mouse_input: Rc<RefCell<systems::MouseInput>>,
+    meshes: Rc<RefCell<LinkedList<model::Finished>>>,
 }
 
 impl PortfolioApp {
@@ -42,10 +57,27 @@ impl PortfolioApp {
             rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas).await)),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
+            meshes: Rc::new(RefCell::new(LinkedList::new()))
         }
     }
 
+    async fn initialize_models(&mut self, unfinished_meshes: &[model::Unfinished]) {
+        for mesh in unfinished_meshes {
+            self.meshes.borrow_mut().append(&mut self.rendering_struct.borrow_mut().load_models(*mesh).await);
+        }
+
+    }
+
     fn update(&self, dt: f64) {
+        for mesh in &mut self.meshes.borrow_mut().iter_mut() {
+            mesh.scale += Vector3::new(
+                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,
+                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,
+                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,);
+            mesh.update_uniform();
+            mesh.write_itself(&self.rendering_struct.borrow().queue)
+        }
+
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
         self.keyboard_input.borrow_mut().update(&self, dt);
         self.mouse_input.borrow_mut().update(&self);
@@ -178,11 +210,11 @@ struct RenderingStruct {
     canvas: HtmlCanvasElement,
     config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    meshes: LinkedList<Mesh>,
     texture: Texture,
     camera: camera::Camera,
     time: time::Time,
-    depth_texture: DepthTexture
+    depth_texture: DepthTexture,
+    mesh_bind_group_layout: wgpu::BindGroupLayout
 }
 
 impl RenderingStruct {
@@ -269,11 +301,6 @@ impl RenderingStruct {
 
         let mesh_bind_group_layout = device.create_bind_group_layout(&consts::MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
-        //TODO: Move the of loading OBJs out of rendering struct, like with UnfinishedMesh! With that i'd also be able to store transformation stuff for the mesh
-        let mut meshes = LinkedList::new();
-        meshes.append(&mut Mesh::obj_from_link("monkey.obj".to_string(), &device, &mesh_bind_group_layout).await.unwrap());
-
-
         let texture = Texture::new(&device).unwrap();
 
         let render_pipeline_layout = device.create_pipeline_layout(
@@ -337,7 +364,7 @@ impl RenderingStruct {
         });
 
         Self {
-            surface, device, queue, canvas, config, render_pipeline, meshes, texture, camera, time, depth_texture
+            surface, device, queue, canvas, config, render_pipeline, texture, camera, time, depth_texture, mesh_bind_group_layout
         }
     }
 
@@ -362,7 +389,7 @@ impl RenderingStruct {
         self.depth_texture = DepthTexture::new(&self.device, width, height);
     }
 
-    fn render(&mut self, dt: f64) -> Result<(), Box<dyn Error>> {
+    fn render(&mut self, dt: f64, objects: &LinkedList<model::Finished>) -> Result<(), Box<dyn Error>> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
             _ => panic!("Can't get surface texture!")
@@ -373,15 +400,6 @@ impl RenderingStruct {
 
         self.time.advance(dt as f32);
         self.time.write_itself(&self.queue);
-
-        for mesh in &mut self.meshes {
-            mesh.scale += Vector3::new(
-                (self.time.uniform.time/1000.0).sin()*0.01,
-                (self.time.uniform.time/1000.0).sin()*0.01,
-                (self.time.uniform.time/1000.0).sin()*0.01,);
-            mesh.update_uniform();
-            mesh.write_itself(&self.queue)
-        }
 
         self.texture.write_itself(&self.queue);
 
@@ -426,7 +444,7 @@ impl RenderingStruct {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera.bind_group, &[]);
             render_pass.set_bind_group(1, &self.time.bind_group, &[]);
-            for mesh in &mut self.meshes {
+            for mesh in objects {
                 render_pass.set_bind_group(2, &mesh.bind_group, &[]);
                 render_pass.set_bind_group(3, &self.texture.bind_group, &[]);
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
@@ -439,6 +457,10 @@ impl RenderingStruct {
         frame.present();
         Ok(())
     }
+
+    async fn load_models(&self, model: model::Unfinished) -> LinkedList<model::Finished> {
+        model::Finished::from_unfinished(model, &self.device, &self.mesh_bind_group_layout).await.unwrap()
+    }
 }
 
 #[wasm_bindgen(start)]
@@ -448,7 +470,9 @@ pub async fn main() -> Result<(), JsValue> {
         .get_element_by_id(consts::CANVAS_ID).expect("Can't get canvas, maybe change CANVAS_ID?");
     let canvas = canvas.dyn_into::<HtmlCanvasElement>()?;
 
-    let app = PortfolioApp::new(canvas).await;
+    let mut app = PortfolioApp::new(canvas).await;
+
+    app.initialize_models(SCENE).await;
 
     {
         let app_for_callback = app.rendering_struct.clone();
@@ -533,7 +557,7 @@ pub async fn main() -> Result<(), JsValue> {
             let dt = current_time-time;
             time = current_time;
             app.update(dt);
-            app.rendering_struct.borrow_mut().render(dt).unwrap();
+            app.rendering_struct.borrow_mut().render(dt, &app.meshes.borrow()).unwrap();
             web_sys::window().unwrap()
                 .request_animation_frame(
                     f.borrow()

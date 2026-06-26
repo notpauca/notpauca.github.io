@@ -19,7 +19,7 @@ pub async fn shader_source() -> Result<String, JsValue> {
     Ok(res.as_string().unwrap())
 }
 
-pub async fn binary_data(path: String) -> Result<Vec<u8>, JsValue> {
+pub async fn binary_data(path: &str) -> Result<Vec<u8>, JsValue> {
     let shader_source_request = RequestInit::new();
     shader_source_request.set_method("GET");
     shader_source_request.set_mode(web_sys::RequestMode::Cors);
