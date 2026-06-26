@@ -6,21 +6,21 @@ mod time;
 mod mesh;
 
 use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow};
-use cgmath::{Deg, Rad, Vector3};
+use cgmath::Vector3;
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
-use crate::mesh::{Mesh, UnfinishedMesh};
+use crate::mesh::Mesh;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    // color: [f32; 4],
-    texture_coords: [f32; 2]
+    texture_coords: [f32; 2],
+    normal: [f32; 3]
 }
 
 impl Vertex {
-    const ATTRIBS: &[wgpu::VertexAttribute; 2] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+    const ATTRIBS: &[wgpu::VertexAttribute; 3] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3];
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
@@ -38,48 +38,8 @@ struct PortfolioApp {
 
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
-        let mut unfinished_meshes = LinkedList::new();
-        unfinished_meshes.push_back(
-            (
-                vec![
-                        Vertex { position: [-0.0868241, 0.49240386, 0.0], texture_coords: [0.4131759, 0.99240386] },
-                        Vertex { position: [-0.49513406, 0.06958647, 0.0], texture_coords: [0.0048659444, 0.56958647] },
-                        Vertex { position: [-0.21918549, -0.44939706, 0.0], texture_coords: [0.28081453, 0.05060294] },
-                        Vertex { position: [0.35966998, -0.3473291, 0.0], texture_coords: [0.85967, 0.1526709] },
-                        Vertex { position: [0.44147372, 0.2347359, 0.0], texture_coords: [0.9414737, 0.7347359] },
-                ],
-                vec![
-                    [0, 1, 4],
-                    [1, 2, 4],
-                    [2, 3, 4],
-                ],
-                Vector3::new(2.0,0.0,0.0),
-                Vector3::new(Rad(0.0), Deg(90.0).into(), Rad(0.0)),
-                Vector3::new(1.0,1.0,1.0)
-            )
-        );
-        unfinished_meshes.push_back(
-            (
-                vec![
-                    Vertex { position: [-0.0868241, 1.49240386, 1.0], texture_coords: [0.4131759, 0.99240386] },
-                    Vertex { position: [-0.49513406, 1.06958647, 1.0], texture_coords: [0.0048659444, 0.56958647] },
-                    Vertex { position: [-0.21918549, -1.44939706, 1.0], texture_coords: [0.28081453, 0.05060294] },
-                    Vertex { position: [0.35966998, -1.3473291, 1.0], texture_coords: [0.85967, 0.1526709] },
-                    Vertex { position: [0.44147372, 1.2347359, 1.0], texture_coords: [0.9414737, 0.7347359] },
-                ],
-                vec![
-                    [1, 4, 0],
-                    [2, 4, 1],
-                    [3, 4, 2],
-                ],
-                Vector3::new(0.0,0.0,0.0),
-                Vector3::new(Rad(0.0),Rad(0.0),Rad(0.0)),
-                Vector3::new(1.0,1.0,1.0)
-            )
-        );
-
         Self {
-            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas, unfinished_meshes).await)),
+            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas).await)),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
         }
@@ -149,7 +109,6 @@ impl Texture {
                 }
             ],
             label: Some("texture_bind_group")
-
         });
 
         Ok(Self {image, image_texture, view, sampler, bind_group, bind_group_layout})
@@ -227,7 +186,7 @@ struct RenderingStruct {
 }
 
 impl RenderingStruct {
-    async fn new(canvas: HtmlCanvasElement, unfinished_meshes: LinkedList<UnfinishedMesh>) -> Self {
+    async fn new(canvas: HtmlCanvasElement) -> Self {
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::BROWSER_WEBGPU,
@@ -310,9 +269,10 @@ impl RenderingStruct {
 
         let mesh_bind_group_layout = device.create_bind_group_layout(&consts::MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
 
-        let meshes = unfinished_meshes.into_iter().map(|unfinished_mesh| {
-            Mesh::new(unfinished_mesh, &device, &mesh_bind_group_layout)
-        }).collect();
+        //TODO: Move the of loading OBJs out of rendering struct, like with UnfinishedMesh! With that i'd also be able to store transformation stuff for the mesh
+        let mut meshes = LinkedList::new();
+        meshes.append(&mut Mesh::obj_from_link("monkey.obj".to_string(), &device, &mesh_bind_group_layout).await.unwrap());
+
 
         let texture = Texture::new(&device).unwrap();
 
