@@ -4,8 +4,9 @@ mod camera;
 mod fetch;
 mod time;
 mod model;
+mod renderer;
 
-use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, borrow::Cow, f32::consts::FRAC_PI_2};
+use std::{error::Error, cell::RefCell, rc::Rc, collections::LinkedList, f32::consts::FRAC_PI_2};
 use cgmath::{Rad, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
@@ -37,7 +38,7 @@ impl Vertex {
     const ATTRIBS: &[wgpu::VertexAttribute; 3] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x3];
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
-            array_stride: size_of::<Vertex>() as wgpu::BufferAddress,
+            array_stride: size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: Self::ATTRIBS,
         }
@@ -45,7 +46,7 @@ impl Vertex {
 }
 
 struct PortfolioApp {
-    rendering_struct: Rc<RefCell<RenderingStruct>>,
+    rendering_struct: Rc<RefCell<renderer::Renderer>>,
     keyboard_input: Rc<RefCell<systems::KeyboardInput>>,
     mouse_input: Rc<RefCell<systems::MouseInput>>,
     meshes: Rc<RefCell<LinkedList<model::Finished>>>,
@@ -54,7 +55,7 @@ struct PortfolioApp {
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
         Self {
-            rendering_struct: Rc::new(RefCell::new(RenderingStruct::new(canvas).await)),
+            rendering_struct: Rc::new(RefCell::new(renderer::Renderer::new(canvas).await.expect("Can't get the WebGPU instance!"))),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
             meshes: Rc::new(RefCell::new(LinkedList::new()))
@@ -81,6 +82,26 @@ impl PortfolioApp {
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
         self.keyboard_input.borrow_mut().update(&self, dt);
         self.mouse_input.borrow_mut().update(&self);
+    }
+
+    fn render(&self, dt: f64) {
+        let mut rendering_struct = self.rendering_struct.borrow_mut();
+
+        let frame = match rendering_struct.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+            _ => panic!("Can't get surface texture!")
+        };
+
+        let view = frame.texture.create_view(&Default::default());
+        let mut encoder = rendering_struct.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+        rendering_struct.update_clock(dt);
+
+        rendering_struct.render_meshes(&self.meshes.borrow(), &mut encoder, &view).unwrap();
+        rendering_struct.render_gui(&mut encoder, &view).unwrap();
+
+        rendering_struct.queue.submit(Some(encoder.finish()));
+        frame.present();
     }
 }
 
@@ -203,266 +224,6 @@ impl DepthTexture {
     }
 }
 
-struct RenderingStruct {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    canvas: HtmlCanvasElement,
-    config: wgpu::SurfaceConfiguration,
-    render_pipeline: wgpu::RenderPipeline,
-    texture: Texture,
-    camera: camera::Camera,
-    time: time::Time,
-    depth_texture: DepthTexture,
-    mesh_bind_group_layout: wgpu::BindGroupLayout
-}
-
-impl RenderingStruct {
-    async fn new(canvas: HtmlCanvasElement) -> Self {
-        let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::BROWSER_WEBGPU,
-                flags: Default::default(),
-                memory_budget_thresholds: Default::default(),
-                backend_options: Default::default(),
-                display: None,
-            }
-        );
-
-        let surface = instance.create_surface(
-            wgpu::SurfaceTarget::Canvas(canvas.clone())
-        ).expect("Can't get wgpu surface!");
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await.unwrap();
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                //apparently webgl doesn't support everything that webgpu has to offer
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
-                memory_hints: Default::default(),
-                trace: wgpu::Trace::Off,
-            })
-            .await.unwrap();
-
-        let size = canvas.get_bounding_client_rect();
-
-        let surface_caps = surface.get_capabilities(&adapter);
-
-        let surface_format = surface_caps.formats.iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width() as u32,
-            height: size.height() as u32,
-            present_mode: surface_caps.present_modes[0],
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: Vec::new(),
-            desired_maximum_frame_latency: 2,
-        };
-
-        surface.configure(
-            &device,
-            &config,
-        );
-
-        let shader_source = fetch::shader_source().await.expect("Can't get shader source!");
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("shaders.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader_source)),
-        });
-
-        let depth_texture = {
-            let rect = canvas.get_bounding_client_rect();
-            DepthTexture::new(&device, rect.width() as u32, rect.height() as u32)
-        };
-
-        let aspect = {
-            let rect = canvas.get_bounding_client_rect();
-            (rect.width() / rect.height()) as f32
-        };
-
-        let camera = camera::Camera::new(aspect, &device);
-
-        let time = time::Time::new(&device);
-
-        let mesh_bind_group_layout = device.create_bind_group_layout(&consts::MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
-
-        let texture = Texture::new(&device).unwrap();
-
-        let render_pipeline_layout = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    Some(&camera.bind_group_layout),
-                    Some(&time.bind_group_layout),
-                    Some(&mesh_bind_group_layout),
-                    Some(&texture.bind_group_layout)
-                ],
-                immediate_size: 0,
-            }
-        );
-
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[
-                    Vertex::desc()
-                ],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                // cull_mode: Some(wgpu::Face::Back),
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
-
-        Self {
-            surface, device, queue, canvas, config, render_pipeline, texture, camera, time, depth_texture, mesh_bind_group_layout
-        }
-    }
-
-    fn resize(&mut self) {
-        let (width, height) = {
-            let size = self.canvas.get_bounding_client_rect();
-            (size.width() as u32, size.height() as u32)
-        };
-
-        web_sys::console::log_1(&format!("w: {}, h: {}", width, height).into());
-
-        if width == 0 || height == 0 { return; }
-        self.canvas.set_width(width);
-        self.canvas.set_height(height);
-
-        self.config.width = width;
-        self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
-
-        self.camera.resize(width as f32/height as f32);
-
-        self.depth_texture = DepthTexture::new(&self.device, width, height);
-    }
-
-    fn render(&mut self, dt: f64, objects: &LinkedList<model::Finished>) -> Result<(), Box<dyn Error>> {
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(texture) => texture,
-            _ => panic!("Can't get surface texture!")
-        };
-
-        self.camera.update_uniform();
-        self.camera.write_itself(&self.queue);
-
-        self.time.advance(dt as f32);
-        self.time.write_itself(&self.queue);
-
-        self.texture.write_itself(&self.queue);
-
-        let view = frame.texture.create_view(&Default::default());
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        {
-            let mut render_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(
-                        wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            depth_slice: None,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(
-                                    wgpu::Color {
-                                        r: 0.2,
-                                        g: 0.4,
-                                        b: 0.8,
-                                        a: 1.0,
-                                    }
-                                ),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        },
-                    )],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                },
-            );
-
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera.bind_group, &[]);
-            render_pass.set_bind_group(1, &self.time.bind_group, &[]);
-            for mesh in objects {
-                render_pass.set_bind_group(2, &mesh.bind_group, &[]);
-                render_pass.set_bind_group(3, &self.texture.bind_group, &[]);
-                render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                render_pass.draw_indexed(0..((mesh.indices.len()*3) as u32), 0, 0..1);
-            }
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-        frame.present();
-        Ok(())
-    }
-
-    async fn load_models(&self, model: model::Unfinished) -> LinkedList<model::Finished> {
-        model::Finished::from_unfinished(model, &self.device, &self.mesh_bind_group_layout).await.unwrap()
-    }
-}
-
 #[wasm_bindgen(start)]
 pub async fn main() -> Result<(), JsValue> {
     let canvas = web_sys::window().unwrap()
@@ -478,15 +239,13 @@ pub async fn main() -> Result<(), JsValue> {
         let app_for_callback = app.rendering_struct.clone();
         let closure = Closure::wrap(Box::new(move || {
             app_for_callback.borrow_mut().resize();
-            // app_for_callback.borrow_mut().render().unwrap();
         }) as Box<dyn FnMut()>);
 
         web_sys::window()
             .unwrap()
-            .add_event_listener_with_callback(
-                "resize",
-                closure.as_ref().unchecked_ref(),
-            )?;
+            .set_onresize(
+                Some(closure.as_ref().unchecked_ref()),
+            );
 
         closure.forget();
     }
@@ -557,7 +316,7 @@ pub async fn main() -> Result<(), JsValue> {
             let dt = current_time-time;
             time = current_time;
             app.update(dt);
-            app.rendering_struct.borrow_mut().render(dt, &app.meshes.borrow()).unwrap();
+            app.render(dt);
             web_sys::window().unwrap()
                 .request_animation_frame(
                     f.borrow()
