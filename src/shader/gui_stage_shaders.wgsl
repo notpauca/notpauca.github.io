@@ -1,8 +1,5 @@
-struct TimeUniform {
-    time: f32,
-};
 @group(0) @binding(0)
-var<uniform> time: TimeUniform;
+var<uniform> time: f32;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -25,6 +22,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     var res = in.color;
-    res.w = (sin(time.time/500)/2.0+0.5)/2.0+0.25;
+    res.w = (sin(time/500)/2.0+0.5)/2.0+0.25;
     return res;
 }

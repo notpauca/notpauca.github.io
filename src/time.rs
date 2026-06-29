@@ -17,7 +17,7 @@ impl Time {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&consts::TIME_BIND_GROUP_LAYOUT_DESCRIPTOR);
+        let bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TIME);
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,

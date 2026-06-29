@@ -4,7 +4,7 @@ use std::error::Error;
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
 
-use crate::{camera, consts, fetch, model, time, DepthTexture, Texture, Vertex};
+use crate::{camera, consts, fetch, model, time, Vertex, texture};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -31,17 +31,19 @@ pub struct Renderer {
     pub queue: wgpu::Queue,
     canvas: HtmlCanvasElement,
     config: wgpu::SurfaceConfiguration,
+    mesh_bind_group_layout: wgpu::BindGroupLayout,
     mesh_render_pipeline: wgpu::RenderPipeline,
     gui_render_pipeline: wgpu::RenderPipeline,
     gui_vertices: Vec<Vertex2D>,
     gui_indices: Vec<[u16; 3]>,
     gui_index_buffer: wgpu::Buffer,
     gui_vertex_buffer: wgpu::Buffer,
-    pub texture: Texture,
+    pub texture: texture::Texture,
     pub camera: camera::Camera,
     pub time: time::Time,
-    pub(crate) depth_texture: DepthTexture,
-    mesh_bind_group_layout: wgpu::BindGroupLayout
+    pub depth_texture: texture::Depth,
+    skybox_render_pipeline: wgpu::RenderPipeline,
+    skybox: texture::Skybox
 }
 
 impl Renderer {
@@ -71,10 +73,9 @@ impl Renderer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::empty(),
+                required_features: wgpu::Features::all_webgpu_mask(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                //apparently webgl doesn't support everything that webgpu has to offer
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                required_limits: wgpu::Limits::downlevel_defaults(),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -106,7 +107,6 @@ impl Renderer {
         );
 
         let mesh_shader_source = fetch::shader_source(consts::MESH_SHADER_PATH).await.expect("Can't get mesh shader source!");
-
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mesh_stage_shaders.wgsl"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&mesh_shader_source)),
@@ -118,9 +118,15 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&gui_shader_source)),
         });
 
+        let skybox_shader_source = fetch::shader_source(consts::SKYBOX_SHADER_PATH).await.expect("Can't get mesh shader source!");
+        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mesh_stage_shaders.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&skybox_shader_source)),
+        });
+
         let depth_texture = {
             let rect = canvas.get_bounding_client_rect();
-            DepthTexture::new(&device, rect.width() as u32, rect.height() as u32)
+            texture::Depth::new(&device, rect.width() as u32, rect.height() as u32)
         };
 
         let aspect = {
@@ -132,9 +138,9 @@ impl Renderer {
 
         let time = time::Time::new(&device);
 
-        let mesh_bind_group_layout = device.create_bind_group_layout(&consts::MESH_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
+        let mesh_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::MESH_TRANSFORM);
 
-        let texture = Texture::new(&device)?;
+        let texture = texture::Texture::new(&device).await?;
 
         let mesh_render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
@@ -224,15 +230,12 @@ impl Renderer {
             }
         );
 
-        // let gui_element_bind_group_layout = device.create_bind_group_layout(&consts::GUI_TRANSFORM_BIND_GROUP_LAYOUT_DESCRIPTOR);
-
         let gui_render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Gui Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&time.bind_group_layout),
-                    // Some(&gui_element_bind_group_layout),
-                    //textures will come later, hopefully
+                    //texture will come later, hopefully
                 ],
                 immediate_size: 0,
             }
@@ -279,9 +282,67 @@ impl Renderer {
             cache: None,
         });
 
+        let skybox = texture::Skybox::new(&device, &queue).await.unwrap();
+
+        let skybox_render_pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("Skybox Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&camera.skybox_bind_group_layout),
+                    Some(&time.bind_group_layout),
+                    Some(&skybox.bind_group_layout)
+                    // Some(&gui_element_bind_group_layout),
+                    //texture will come later, hopefully
+                ],
+                immediate_size: 0,
+            }
+        );
+
+        let skybox_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("skybox_render_pipeline"),
+            layout: Some(&skybox_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &skybox_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[], //i'll just have them in the shader?
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &skybox_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // cull_mode: Some(wgpu::Face::Back),
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         Ok(Self {
             surface, device, queue, canvas, config,
-            mesh_render_pipeline, gui_render_pipeline, gui_vertex_buffer, gui_vertices, gui_index_buffer, gui_indices, texture, camera, time, depth_texture, mesh_bind_group_layout
+            camera, time,
+            mesh_render_pipeline, texture, depth_texture, mesh_bind_group_layout,
+            gui_render_pipeline, gui_vertex_buffer, gui_vertices, gui_index_buffer, gui_indices,
+            skybox_render_pipeline, skybox
         })
     }
 
@@ -303,12 +364,47 @@ impl Renderer {
 
         self.camera.resize(width as f32/height as f32);
 
-        self.depth_texture = DepthTexture::new(&self.device, width, height);
+        self.depth_texture = texture::Depth::new(&self.device, width, height);
     }
 
     pub fn update_clock(&mut self, dt: f64) {
         self.time.advance(dt as f32);
         self.time.write_itself(&self.queue);
+    }
+
+    pub fn render_skybox(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+        self.camera.update_skybox_uniform();
+        self.camera.write_rotations(&self.queue);
+
+        self.time.write_itself(&self.queue);
+        {
+            let mut render_pass = encoder.begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    label: Some("skybox_render_pass"),
+                    color_attachments: &[Some(
+                        wgpu::RenderPassColorAttachment {
+                            view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        },
+                    )],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                },
+            );
+            render_pass.set_pipeline(&self.skybox_render_pipeline);
+            render_pass.set_bind_group(0, &self.camera.skybox_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.time.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.skybox.bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
+        }
+        Ok(())
     }
 
     pub fn render_meshes(&mut self, objects: &LinkedList<model::Finished>, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
@@ -326,14 +422,7 @@ impl Renderer {
                             depth_slice: None,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(
-                                    wgpu::Color {
-                                        r: 0.2,
-                                        g: 0.4,
-                                        b: 0.8,
-                                        a: 1.0,
-                                    }
-                                ),
+                                load: wgpu::LoadOp::Load, //using skybox now
                                 store: wgpu::StoreOp::Store,
                             },
                         },
