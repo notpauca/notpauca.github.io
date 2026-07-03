@@ -65,18 +65,20 @@ impl Texture {
     }
 
     pub fn write_itself(&self, queue: &wgpu::Queue) {
-        queue.write_texture(wgpu::TexelCopyTextureInfo {
-            texture: &self.image_texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-                            &self.image.as_raw().as_slice(),
-                            wgpu::TexelCopyBufferLayout {
-                                offset: 0,
-                                bytes_per_row: Some(4*self.image.width()),
-                                rows_per_image: Some(self.image.height())
-                            },
-                            self.image_texture.size());
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.image_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &self.image.as_raw().as_slice(),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4*self.image.width()),
+                rows_per_image: Some(self.image.height())
+            },
+            self.image_texture.size()
+        );
     }
 }

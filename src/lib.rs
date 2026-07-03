@@ -47,7 +47,7 @@ impl Vertex {
 }
 
 struct PortfolioApp {
-    rendering_struct: Rc<RefCell<renderer::Renderer>>,
+    renderer: Rc<RefCell<renderer::Renderer>>,
     keyboard_input: Rc<RefCell<systems::KeyboardInput>>,
     mouse_input: Rc<RefCell<systems::MouseInput>>,
     meshes: Rc<RefCell<LinkedList<model::Finished>>>,
@@ -56,7 +56,7 @@ struct PortfolioApp {
 impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
         Self {
-            rendering_struct: Rc::new(RefCell::new(renderer::Renderer::new(canvas).await.expect("Can't get the WebGPU instance!"))),
+            renderer: Rc::new(RefCell::new(renderer::Renderer::new(canvas).await.expect("Can't get the WebGPU instance!"))),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
             meshes: Rc::new(RefCell::new(LinkedList::new()))
@@ -65,7 +65,7 @@ impl PortfolioApp {
 
     async fn initialize_models(&mut self, unfinished_meshes: &[model::Unfinished]) {
         for mesh in unfinished_meshes {
-            self.meshes.borrow_mut().append(&mut self.rendering_struct.borrow_mut().load_models(*mesh).await);
+            self.meshes.borrow_mut().append(&mut self.renderer.borrow_mut().load_models(*mesh).await);
         }
 
     }
@@ -73,11 +73,11 @@ impl PortfolioApp {
     fn update(&self, dt: f64) {
         for mesh in &mut self.meshes.borrow_mut().iter_mut() {
             mesh.scale += Vector3::new(
-                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,
-                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,
-                (self.rendering_struct.borrow().time.uniform.time/1000.0).sin()*0.01,);
+                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
+                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
+                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,);
             mesh.update_uniform();
-            mesh.write_itself(&self.rendering_struct.borrow().queue)
+            mesh.write_itself(&self.renderer.borrow().queue)
         }
 
         // web_sys::console::debug_1(&format!("dt: {}", dt).into()); //for frame times
@@ -86,22 +86,27 @@ impl PortfolioApp {
     }
 
     fn render(&self, dt: f64) {
-        let mut rendering_struct = self.rendering_struct.borrow_mut();
+        let mut renderer = self.renderer.borrow_mut();
 
-        let frame = match rendering_struct.surface.get_current_texture() {
+        let frame = match renderer.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Suboptimal(_) => {
+                renderer.surface.configure(&renderer.device, &renderer.config);
+                return;
+            },
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
             _ => panic!("Can't get surface texture!")
         };
 
-        let view = frame.texture.create_view(&Default::default());
-        let mut encoder = rendering_struct.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let fb_view = frame.texture.create_view(&Default::default());
+        let mut encoder = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
-        rendering_struct.update_clock(dt);
-        rendering_struct.render_skybox(&mut encoder, &view).unwrap();
-        rendering_struct.render_meshes(&self.meshes.borrow(), &mut encoder, &view).unwrap();
-        rendering_struct.render_gui(&mut encoder, &view).unwrap();
+        renderer.update_clock(dt);
+        renderer.render_skybox(&mut encoder, &fb_view).unwrap();
+        renderer.render_meshes(&self.meshes.borrow(), &mut encoder, &fb_view).unwrap();
+        renderer.render_gui(&mut encoder, &fb_view).unwrap();
 
-        rendering_struct.queue.submit(Some(encoder.finish()));
+        renderer.queue.submit(Some(encoder.finish()));
         frame.present();
     }
 }
@@ -118,7 +123,7 @@ pub async fn main() -> Result<(), JsValue> {
     app.initialize_models(SCENE).await;
 
     {
-        let app_for_callback = app.rendering_struct.clone();
+        let app_for_callback = app.renderer.clone();
         let closure = Closure::wrap(Box::new(move || {
             app_for_callback.borrow_mut().resize();
         }) as Box<dyn FnMut()>);

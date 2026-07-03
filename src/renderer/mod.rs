@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::collections::LinkedList;
 use std::error::Error;
 use web_sys::HtmlCanvasElement;
-use wgpu::util::DeviceExt;
 
 use crate::{camera, consts, fetch, model, time, Vertex, texture};
 
@@ -30,14 +29,10 @@ pub struct Renderer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     canvas: HtmlCanvasElement,
-    config: wgpu::SurfaceConfiguration,
+    pub(crate) config: wgpu::SurfaceConfiguration,
     mesh_bind_group_layout: wgpu::BindGroupLayout,
     mesh_render_pipeline: wgpu::RenderPipeline,
     gui_render_pipeline: wgpu::RenderPipeline,
-    gui_vertices: Vec<Vertex2D>,
-    gui_indices: Vec<[u16; 3]>,
-    gui_index_buffer: wgpu::Buffer,
-    gui_vertex_buffer: wgpu::Buffer,
     pub texture: texture::Texture,
     pub camera: camera::Camera,
     pub time: time::Time,
@@ -202,34 +197,6 @@ impl Renderer {
             cache: None,
         });
 
-
-        let gui_vertices = vec![
-            Vertex2D { coords: [1.0, 1.0, 0.0], color: [1.0, 0.0, 0.0, 0.5] },
-            Vertex2D { coords: [-1.0, 1.0, 0.0], color: [1.0, 1.0, 1.0, 0.5] },
-            Vertex2D { coords: [-1.0, -1.0, 0.0], color: [1.0, 1.0, 0.0, 0.5] },
-            Vertex2D { coords: [1.0, -1.0, 0.0], color: [1.0, 1.0, 1.0, 0.5] },
-        ];
-        let gui_indices: Vec<[u16; 3]> = vec![
-            [0, 1, 2],
-            [0, 2, 3]
-        ];
-
-        let gui_vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("gui_vertex_buffer"),
-                contents: bytemuck::cast_slice(gui_vertices.as_slice()),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-
-        let gui_index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("gui_index_buffer"),
-                contents: bytemuck::cast_slice(gui_indices.as_slice()),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
-
         let gui_render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Gui Render Pipeline Layout"),
@@ -247,9 +214,7 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &gui_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[
-                    Vertex2D::desc()
-                ],
+                buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -341,7 +306,7 @@ impl Renderer {
             surface, device, queue, canvas, config,
             camera, time,
             mesh_render_pipeline, texture, depth_texture, mesh_bind_group_layout,
-            gui_render_pipeline, gui_vertex_buffer, gui_vertices, gui_index_buffer, gui_indices,
+            gui_render_pipeline,
             skybox_render_pipeline, skybox
         })
     }
@@ -479,10 +444,7 @@ impl Renderer {
             );
             render_pass.set_pipeline(&self.gui_render_pipeline);
             render_pass.set_bind_group(0, &self.time.bind_group, &[]);
-
-            render_pass.set_vertex_buffer(0, self.gui_vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.gui_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..((self.gui_indices.len()*3) as u32), 0, 0..1);
+            render_pass.draw(0..3, 0..1);
 
         }
         Ok(())

@@ -45,7 +45,7 @@ impl KeyboardInputSystem {
             up -= 1.0;
         }
 
-        let rendering_struct = &mut app.rendering_struct.borrow_mut();
+        let rendering_struct = &mut app.renderer.borrow_mut();
         let mut yaw = rendering_struct.camera.stats.yaw;
         let mut pitch = rendering_struct.camera.stats.pitch;
 

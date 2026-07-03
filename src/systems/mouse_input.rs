@@ -15,7 +15,7 @@ impl MouseInputSystem {
     }
 
     pub fn update(&mut self, app: &PortfolioApp) {
-        let rendering_struct = &mut app.rendering_struct.borrow_mut();
+        let rendering_struct = &mut app.renderer.borrow_mut();
         let sens = 0.005;
 
         rendering_struct.camera.stats.yaw += Rad(self.mouse_movement_delta.0 * sens);
