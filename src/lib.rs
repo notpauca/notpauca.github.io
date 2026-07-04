@@ -102,10 +102,10 @@ impl PortfolioApp {
         let mut encoder = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
         renderer.update_clock(dt);
-        renderer.render_skybox(&mut encoder, &fb_view).unwrap();
-        renderer.render_meshes(&self.meshes.borrow(), &mut encoder, &fb_view).unwrap();
-        renderer.render_gui(&mut encoder, &fb_view).unwrap();
-
+        renderer.render_skybox(&mut encoder).unwrap();
+        renderer.render_meshes(&self.meshes.borrow(), &mut encoder).unwrap();
+        renderer.render_gui(&mut encoder).unwrap();
+        renderer.render_postproc(&mut encoder, &fb_view).unwrap();
         renderer.queue.submit(Some(encoder.finish()));
         frame.present();
     }

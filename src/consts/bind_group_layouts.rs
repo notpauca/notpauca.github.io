@@ -121,3 +121,19 @@ pub const GUI_TRANSFORM: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayout
     ],
     label: Some("gui_bind_group_layout"),
 };
+
+pub const SCREEN_SIZE: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
+    entries: &[
+        wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    ],
+    label: Some("screen_size_bind_group_layout"),
+};

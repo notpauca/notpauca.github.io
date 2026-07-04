@@ -1,8 +1,6 @@
-use std::borrow::Cow;
-use std::collections::LinkedList;
-use std::error::Error;
+use std::{borrow::Cow, collections::LinkedList, error::Error};
 use web_sys::HtmlCanvasElement;
-
+use wgpu::util::DeviceExt;
 use crate::{camera, consts, fetch, model, time, Vertex, texture};
 
 #[repr(C)]
@@ -29,16 +27,21 @@ pub struct Renderer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     canvas: HtmlCanvasElement,
-    pub(crate) config: wgpu::SurfaceConfiguration,
+    pub config: wgpu::SurfaceConfiguration,
+    pub pre_postproc_texture: texture::DrawTo,
+    pre_postproc_texture_bind_group_layout: wgpu::BindGroupLayout,
     mesh_bind_group_layout: wgpu::BindGroupLayout,
     mesh_render_pipeline: wgpu::RenderPipeline,
     gui_render_pipeline: wgpu::RenderPipeline,
+    postproc_render_pipeline: wgpu::RenderPipeline,
     pub texture: texture::Texture,
     pub camera: camera::Camera,
     pub time: time::Time,
     pub depth_texture: texture::Depth,
     skybox_render_pipeline: wgpu::RenderPipeline,
-    skybox: texture::Skybox
+    skybox: texture::Skybox,
+    screen_size_bind_group: wgpu::BindGroup,
+    screen_size_buffer: wgpu::Buffer,
 }
 
 impl Renderer {
@@ -96,6 +99,10 @@ impl Renderer {
             desired_maximum_frame_latency: 2,
         };
 
+        let pre_postproc_texture_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TEXTURE);
+
+        let pre_postproc_texture = texture::DrawTo::new(&device, config.width, config.height, &pre_postproc_texture_bind_group_layout);
+
         surface.configure(
             &device,
             &config,
@@ -113,10 +120,16 @@ impl Renderer {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&gui_shader_source)),
         });
 
-        let skybox_shader_source = fetch::shader_source(consts::SKYBOX_SHADER_PATH).await.expect("Can't get mesh shader source!");
+        let skybox_shader_source = fetch::shader_source(consts::SKYBOX_SHADER_PATH).await.expect("Can't get skybox shader source!");
         let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mesh_stage_shaders.wgsl"),
+            label: Some("skybox_stage_shaders.wgsl"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&skybox_shader_source)),
+        });
+
+        let postproc_shader_source = fetch::shader_source(consts::POSTPROC_SHADER_PATH).await.expect("Can't get postproc shader source!");
+        let postproc_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("postproc_stage_shaders.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&postproc_shader_source)),
         });
 
         let depth_texture = {
@@ -175,8 +188,7 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                // cull_mode: Some(wgpu::Face::Back),
-                cull_mode: None,
+                cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -256,8 +268,6 @@ impl Renderer {
                     Some(&camera.skybox_bind_group_layout),
                     Some(&time.bind_group_layout),
                     Some(&skybox.bind_group_layout)
-                    // Some(&gui_element_bind_group_layout),
-                    //texture will come later, hopefully
                 ],
                 immediate_size: 0,
             }
@@ -269,7 +279,7 @@ impl Renderer {
             vertex: wgpu::VertexState {
                 module: &skybox_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[], //i'll just have them in the shader?
+                buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -302,16 +312,86 @@ impl Renderer {
             cache: None,
         });
 
+        let screen_size_arr = [size.width() as u32, size.height() as u32];
+        let screen_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("screen_size_buffer"),
+            contents: bytemuck::cast_slice(&screen_size_arr),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let screen_size_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::SCREEN_SIZE);
+
+        let screen_size_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &screen_size_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_size_buffer.as_entire_binding()
+            }],
+            label: Some("screen_size_bind_group")
+        });
+
+        let postproc_render_pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("Postproc Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&time.bind_group_layout),
+                    Some(&pre_postproc_texture_bind_group_layout),
+                    Some(&screen_size_bind_group_layout)
+                ],
+                immediate_size: 0,
+            }
+        );
+
+        let postproc_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("postproc_render_pipeline"),
+            layout: Some(&postproc_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &postproc_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &postproc_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         Ok(Self {
             surface, device, queue, canvas, config,
             camera, time,
             mesh_render_pipeline, texture, depth_texture, mesh_bind_group_layout,
             gui_render_pipeline,
-            skybox_render_pipeline, skybox
+            skybox_render_pipeline, skybox,
+            postproc_render_pipeline, pre_postproc_texture, pre_postproc_texture_bind_group_layout,
+            screen_size_bind_group, screen_size_buffer
         })
     }
 
-    pub fn resize(&mut self) {
+    pub fn resize(&mut self) { //TODO: investigate,why resize is slower than something like slowroads.io
         let (width, height) = {
             let size = self.canvas.get_bounding_client_rect();
             (size.width() as u32, size.height() as u32)
@@ -327,6 +407,10 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
 
+        self.pre_postproc_texture = texture::DrawTo::new(&self.device, width, height, &self.pre_postproc_texture_bind_group_layout);
+
+        self.queue.write_buffer(&self.screen_size_buffer, 0, bytemuck::cast_slice(&[width, height]));
+
         self.camera.resize(width as f32/height as f32);
 
         self.depth_texture = texture::Depth::new(&self.device, width, height);
@@ -337,10 +421,10 @@ impl Renderer {
         self.time.write_itself(&self.queue);
     }
 
-    pub fn render_skybox(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+    pub fn render_skybox(&mut self, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
         self.camera.update_skybox_uniform();
         self.camera.write_rotations(&self.queue);
-
+        let view = &self.pre_postproc_texture.view;
         self.time.write_itself(&self.queue);
         {
             let mut render_pass = encoder.begin_render_pass(
@@ -372,10 +456,10 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render_meshes(&mut self, objects: &LinkedList<model::Finished>, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+    pub fn render_meshes(&mut self, objects: &LinkedList<model::Finished>, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
+        let view = &self.pre_postproc_texture.view;
         self.camera.update_uniform();
         self.camera.write_itself(&self.queue);
-
         self.texture.write_itself(&self.queue);
         {
             let mut render_pass = encoder.begin_render_pass(
@@ -419,7 +503,8 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render_gui(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+    pub fn render_gui(&mut self, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
+        let view = &self.pre_postproc_texture.view;
         {
             self.time.write_itself(&self.queue);
             let mut render_pass = encoder.begin_render_pass(
@@ -446,6 +531,38 @@ impl Renderer {
             render_pass.set_bind_group(0, &self.time.bind_group, &[]);
             render_pass.draw(0..3, 0..1);
 
+        }
+        Ok(())
+    }
+
+    pub fn render_postproc(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) -> Result<(), Box<dyn Error>> {
+        self.time.write_itself(&self.queue);
+        {
+            let mut render_pass = encoder.begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    label: Some("postproc_render_pass"),
+                    color_attachments: &[Some(
+                        wgpu::RenderPassColorAttachment {
+                            view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        },
+                    )],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                },
+            );
+            render_pass.set_pipeline(&self.postproc_render_pipeline);
+            render_pass.set_bind_group(0, &self.time.bind_group, &[]);
+            render_pass.set_bind_group(1, &self.pre_postproc_texture.bind_group, &[]);
+            render_pass.set_bind_group(2, &self.screen_size_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
         }
         Ok(())
     }
