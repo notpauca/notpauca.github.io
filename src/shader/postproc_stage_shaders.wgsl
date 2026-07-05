@@ -39,14 +39,14 @@ fn barrel_distort(uv: vec2<f32>) -> vec2<f32> {
 
 fn chromatic_aberration(uv: vec2<f32>) -> vec4<f32> {
     let chromatic_offset = vec2(0.015, 0.0);
-    let r = textureSample(t_diffuse, s_diffuse, uv + chromatic_offset).r;
+    let r = textureSample(t_diffuse, s_diffuse, uv + chromatic_offset*sin(time/1000.0)).r;
     let g = textureSample(t_diffuse, s_diffuse, uv).g;
-    let b = textureSample(t_diffuse, s_diffuse, uv - chromatic_offset).b;
+    let b = textureSample(t_diffuse, s_diffuse, uv - chromatic_offset*sin(time/1000.0)).b;
     return vec4(r, g, b, 1.0);
 }
 
 fn scanline(color: vec4<f32>, uv: vec2<f32>) -> vec4<f32> {
-    let scanline = 0.92 + 0.08 * sin(uv.y * f32(screen_size.y/4) * 3.14159);
+    let scanline = 0.92 + 0.08 * sin(uv.y * f32(screen_size.y/6) * 3.14159);
     return color*scanline;
 }
 

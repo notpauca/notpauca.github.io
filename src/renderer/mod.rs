@@ -391,7 +391,7 @@ impl Renderer {
         })
     }
 
-    pub fn resize(&mut self) { //TODO: investigate,why resize is slower than something like slowroads.io
+    pub fn resize(&mut self) {
         let (width, height) = {
             let size = self.canvas.get_bounding_client_rect();
             (size.width() as u32, size.height() as u32)

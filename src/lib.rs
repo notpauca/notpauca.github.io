@@ -72,10 +72,11 @@ impl PortfolioApp {
 
     fn update(&self, dt: f64) {
         for mesh in &mut self.meshes.borrow_mut().iter_mut() {
-            mesh.scale += Vector3::new(
-                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
-                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
-                (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,);
+            mesh.rotations.y=Rad(self.renderer.borrow().time.uniform.time/1000.0);
+            // mesh.scale += Vector3::new(
+            //     (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
+            //     (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,
+            //     (self.renderer.borrow().time.uniform.time/1000.0).sin()*0.01,);
             mesh.update_uniform();
             mesh.write_itself(&self.renderer.borrow().queue)
         }
