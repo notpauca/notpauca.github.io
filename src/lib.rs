@@ -108,7 +108,7 @@ impl PortfolioApp {
         renderer.render_gui(&mut encoder).unwrap();
         renderer.render_postproc(&mut encoder, &fb_view).unwrap();
         renderer.queue.submit(Some(encoder.finish()));
-        frame.present();
+        renderer.queue.present(frame);
     }
 }
 
@@ -121,7 +121,9 @@ pub async fn main() -> Result<(), JsValue> {
 
     let mut app = PortfolioApp::new(canvas).await;
 
+
     app.initialize_models(SCENE).await;
+
 
     {
         let app_for_callback = app.renderer.clone();

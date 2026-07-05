@@ -9,13 +9,13 @@ repository = "https://github.com/notpauca/notpauca.github.io"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2.91"
-wasm-bindgen-futures = "0.4.73"
-wgpu = "29.0.3"
+wasm-bindgen = "0.2.126"
+wasm-bindgen-futures = "0.4.76"
+wgpu = "30.0.0"
 cgmath = "0.18.0"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 image = { version = "0.25.10",features = ["jpeg", "png"] }
-web-sys = {version = "0.3.100", features = ["KeyboardEvent", "Window", "Document", "console", "HtmlCanvasElement", "DomRect", "ResizeObserver", "DateTimeValue", "Request", "RequestInit", "RequestMode", "Response", "Headers", "PointerEvent", "ReadableStream"] }
+web-sys = {version = "0.3.103", features = ["KeyboardEvent", "Window", "Document", "console", "HtmlCanvasElement", "DomRect", "ResizeObserver", "DateTimeValue", "Request", "RequestInit", "RequestMode", "Response", "Headers", "PointerEvent", "ReadableStream"] }
 tobj = {version = "4.0.4", features = ["async"], default-features = false}
 
 itertools = { version = "0.15.0" }

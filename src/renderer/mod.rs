@@ -65,15 +65,16 @@ impl Renderer {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::all_webgpu_mask(),
+                required_features: adapter.features(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: adapter.limits(),
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -91,6 +92,7 @@ impl Renderer {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
+            color_space: wgpu::SurfaceColorSpace::Srgb,
             width: size.width() as u32,
             height: size.height() as u32,
             present_mode: surface_caps.present_modes[0],
@@ -170,7 +172,7 @@ impl Renderer {
                 module: &mesh_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
-                    Vertex::desc()
+                    Some(Vertex::desc())
                 ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
