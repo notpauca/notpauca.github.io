@@ -114,17 +114,16 @@ impl PortfolioApp {
 
 #[wasm_bindgen(start)]
 pub async fn main() -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
     let canvas = web_sys::window().unwrap()
         .document().unwrap()
         .get_element_by_id(consts::CANVAS_ID).expect("Can't get canvas, maybe change CANVAS_ID?");
     let canvas = canvas.dyn_into::<HtmlCanvasElement>()?;
 
     let mut app = PortfolioApp::new(canvas).await;
-
-
     app.initialize_models(SCENE).await;
 
-
+    //on resize
     {
         let app_for_callback = app.renderer.clone();
         let closure = Closure::wrap(Box::new(move || {

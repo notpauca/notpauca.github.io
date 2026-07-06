@@ -12,4 +12,4 @@ check() {
 check wasm-pack
 check python3
 
-wasm-pack build --dev --target web && python3 -m http.server 8000
+wasm-pack build --dev --target web && ./run.py ip=127.0.0.1 port=8000
