@@ -19,3 +19,4 @@ image = { version = "0.25.10",features = ["jpeg", "png"] }
 web-sys = {version = "0.3.103", features = ["KeyboardEvent", "Window", "Document", "console", "HtmlCanvasElement", "DomRect", "ResizeObserver", "DateTimeValue", "Request", "RequestInit", "RequestMode", "Response", "Headers", "PointerEvent", "ReadableStream"] }
 tobj = {version = "4.0.4", features = ["async"], default-features = false}
 itertools = { version = "0.15.0" }
+fontdue = "0.9.3"

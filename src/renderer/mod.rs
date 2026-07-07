@@ -1,3 +1,5 @@
+mod fonts;
+
 use std::{borrow::Cow, collections::LinkedList, error::Error};
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
@@ -42,6 +44,8 @@ pub struct Renderer {
     skybox: texture::Skybox,
     screen_size_bind_group: wgpu::BindGroup,
     screen_size_buffer: wgpu::Buffer,
+    fonts: Vec<fontdue::Font>,
+    glyph_bind_group_layout: wgpu::BindGroupLayout
 }
 
 impl Renderer {
@@ -109,6 +113,11 @@ impl Renderer {
             &device,
             &config,
         );
+
+        let mut fonts = Vec::new();
+        for font_name in ["IBMPlexSans.ttf"] {
+            fonts.push(fonts::load_font(font_name).await);
+        }
 
         let mesh_shader_source = fetch::shader_source(consts::MESH_SHADER_PATH).await.expect("Can't get mesh shader source!");
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -211,11 +220,15 @@ impl Renderer {
             cache: None,
         });
 
+
+        let glyph_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TEXTURE);
+
         let gui_render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Gui Render Pipeline Layout"),
                 bind_group_layouts: &[
                     Some(&time.bind_group_layout),
+                    Some(&glyph_bind_group_layout)
                     //texture will come later, hopefully
                 ],
                 immediate_size: 0,
@@ -386,7 +399,7 @@ impl Renderer {
             surface, device, queue, canvas, config,
             camera, time,
             mesh_render_pipeline, texture, depth_texture, mesh_bind_group_layout,
-            gui_render_pipeline,
+            gui_render_pipeline, fonts, glyph_bind_group_layout,
             skybox_render_pipeline, skybox,
             postproc_render_pipeline, pre_postproc_texture, pre_postproc_texture_bind_group_layout,
             screen_size_bind_group, screen_size_buffer
@@ -506,6 +519,10 @@ impl Renderer {
     }
 
     pub fn render_gui(&mut self, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
+        let text = 'e';
+        let (glyph_metrics, glyph_bitmap) = self.fonts[0].rasterize(text, 100.0);
+        let glyph = texture::Glyph::new(&self.device, glyph_metrics, glyph_bitmap, &self.glyph_bind_group_layout);
+        glyph.write_itself(&self.queue);
         let view = &self.pre_postproc_texture.view;
         {
             self.time.write_itself(&self.queue);
@@ -531,6 +548,7 @@ impl Renderer {
             );
             render_pass.set_pipeline(&self.gui_render_pipeline);
             render_pass.set_bind_group(0, &self.time.bind_group, &[]);
+            render_pass.set_bind_group(1, &glyph.bind_group, &[]);
             render_pass.draw(0..3, 0..1);
 
         }
