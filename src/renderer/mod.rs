@@ -1,28 +1,7 @@
-mod fonts;
-
-use std::{borrow::Cow, collections::LinkedList, error::Error};
+use std::{borrow::Cow, collections::{LinkedList, HashMap}, error::Error};
 use web_sys::HtmlCanvasElement;
 use wgpu::util::DeviceExt;
-use crate::{camera, consts, fetch, model, time, Vertex, texture};
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex2D {
-    coords: [f32; 3],
-    color: [f32; 4]
-}
-
-impl Vertex2D {
-    const ATTRS: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: Self::ATTRS,
-        }
-    }
-}
+use crate::{camera, consts, fetch, model, time, Vertex, texture, gui_element};
 
 pub struct Renderer {
     pub surface: wgpu::Surface<'static>,
@@ -44,7 +23,7 @@ pub struct Renderer {
     skybox: texture::Skybox,
     screen_size_bind_group: wgpu::BindGroup,
     screen_size_buffer: wgpu::Buffer,
-    fonts: Vec<fontdue::Font>,
+    fonts: HashMap<&'static str, fontdue::Font>,
     glyph_bind_group_layout: wgpu::BindGroupLayout
 }
 
@@ -114,9 +93,9 @@ impl Renderer {
             &config,
         );
 
-        let mut fonts = Vec::new();
-        for font_name in ["IBMPlexSans.ttf"] {
-            fonts.push(fonts::load_font(font_name).await);
+        let mut fonts = HashMap::new();
+        for font_name in ["IBMPlexSans.ttf", "JetBrainsMono-Medium.ttf"] {
+            fonts.insert(font_name, fetch::font(font_name).await);
         }
 
         let mesh_shader_source = fetch::shader_source(consts::MESH_SHADER_PATH).await.expect("Can't get mesh shader source!");
@@ -220,60 +199,6 @@ impl Renderer {
             cache: None,
         });
 
-
-        let glyph_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TEXTURE);
-
-        let gui_render_pipeline_layout = device.create_pipeline_layout(
-            &wgpu::PipelineLayoutDescriptor {
-                label: Some("Gui Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    Some(&time.bind_group_layout),
-                    Some(&glyph_bind_group_layout)
-                    //texture will come later, hopefully
-                ],
-                immediate_size: 0,
-            }
-        );
-
-        let gui_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("gui_render_pipeline"),
-            layout: Some(&gui_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &gui_shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &gui_shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                // cull_mode: Some(wgpu::Face::Back),
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview_mask: None,
-            cache: None,
-        });
-
         let skybox = texture::Skybox::new(&device, &queue).await.unwrap();
 
         let skybox_render_pipeline_layout = device.create_pipeline_layout(
@@ -345,6 +270,61 @@ impl Renderer {
             label: Some("screen_size_bind_group")
         });
 
+        let glyph_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TEXTURE);
+
+        let gui_render_pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("Gui Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    Some(&time.bind_group_layout),
+                    Some(&screen_size_bind_group_layout),
+                    Some(&glyph_bind_group_layout)
+                    //texture will come later, hopefully
+                ],
+                immediate_size: 0,
+            }
+        );
+
+        let gui_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gui_render_pipeline"),
+            layout: Some(&gui_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &gui_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    Some(gui_element::Vertex2D::desc())
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &gui_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         let postproc_render_pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("Postproc Render Pipeline Layout"),
@@ -399,10 +379,10 @@ impl Renderer {
             surface, device, queue, canvas, config,
             camera, time,
             mesh_render_pipeline, texture, depth_texture, mesh_bind_group_layout,
-            gui_render_pipeline, fonts, glyph_bind_group_layout,
+            gui_render_pipeline, fonts,
             skybox_render_pipeline, skybox,
             postproc_render_pipeline, pre_postproc_texture, pre_postproc_texture_bind_group_layout,
-            screen_size_bind_group, screen_size_buffer
+            screen_size_bind_group, screen_size_buffer, glyph_bind_group_layout
         })
     }
 
@@ -518,11 +498,11 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render_gui(&mut self, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
-        let text = 'e';
-        let (glyph_metrics, glyph_bitmap) = self.fonts[0].rasterize(text, 100.0);
-        let glyph = texture::Glyph::new(&self.device, glyph_metrics, glyph_bitmap, &self.glyph_bind_group_layout);
-        glyph.write_itself(&self.queue);
+    pub fn render_gui(&mut self, objects: &LinkedList<gui_element::Finished>, encoder: &mut wgpu::CommandEncoder) -> Result<(), Box<dyn Error>> {
+        // let text = 'e';
+        // let (glyph_metrics, glyph_bitmap) = self.fonts[0].rasterize(text, 100.0);
+        // let glyph = texture::Glyph::new(&self.device, glyph_metrics, glyph_bitmap, &self.glyph_bind_group_layout);
+        // glyph.write_itself(&self.queue);
         let view = &self.pre_postproc_texture.view;
         {
             self.time.write_itself(&self.queue);
@@ -547,10 +527,17 @@ impl Renderer {
                 },
             );
             render_pass.set_pipeline(&self.gui_render_pipeline);
-            render_pass.set_bind_group(0, &self.time.bind_group, &[]);
-            render_pass.set_bind_group(1, &glyph.bind_group, &[]);
-            render_pass.draw(0..3, 0..1);
-
+            for element in objects {
+                element.write_itself(&self.queue);
+                render_pass.set_bind_group(0, &self.time.bind_group, &[]);
+                render_pass.set_bind_group(1, &self.screen_size_bind_group, &[]);
+                render_pass.set_bind_group(2, &element.bind_group, &[]);
+                render_pass.set_vertex_buffer(0, element.vertex_buffer.slice(..));
+                render_pass.set_index_buffer(element.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                //all ts just to not have an indices member in model2d::Finished
+                let indices_count = element.index_buffer.size() as u32/size_of::<u16>() as u32;
+                render_pass.draw_indexed(0..indices_count, 0, 0..1);
+            }
         }
         Ok(())
     }
@@ -589,5 +576,13 @@ impl Renderer {
 
     pub async fn load_models(&self, model: model::Unfinished) -> LinkedList<model::Finished> {
         model::Finished::from_unfinished(model, &self.device, &self.mesh_bind_group_layout).await.unwrap()
+    }
+
+    pub async fn load_2d_element(&self, element: gui_element::Unfinished) -> LinkedList<gui_element::Finished> {
+        if let Some(font) = self.fonts.get(element.3) {
+            gui_element::Finished::from_unfinished(element, &self.device, font, &self.glyph_bind_group_layout).await
+        } else {
+            LinkedList::new()
+        }
     }
 }

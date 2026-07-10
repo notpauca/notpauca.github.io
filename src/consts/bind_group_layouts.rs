@@ -106,22 +106,6 @@ pub const SKYBOX_ROTATIONS: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLay
     label: Some("skybox_rotations_bind_group_layout"),
 };
 
-pub const GUI_TRANSFORM: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
-    entries: &[
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }
-    ],
-    label: Some("gui_bind_group_layout"),
-};
-
 pub const SCREEN_SIZE: wgpu::BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     entries: &[
         wgpu::BindGroupLayoutEntry {

@@ -37,3 +37,8 @@ pub async fn binary_data(path: &str) -> Result<Vec<u8>, JsValue> {
     let res = web_sys::js_sys::Uint8Array::new(&resp_value.array_buffer()?.await?);
     Ok(res.to_vec())
 }
+
+pub async fn font(name: &str) -> fontdue::Font {
+    let font_file_bytes = binary_data(&format!("fonts/{name}")).await.unwrap();
+    fontdue::Font::from_bytes(font_file_bytes.as_slice(), Default::default()).unwrap()
+}

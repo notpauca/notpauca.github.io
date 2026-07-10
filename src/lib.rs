@@ -6,9 +6,10 @@ mod time;
 mod model;
 mod renderer;
 mod texture;
+mod gui_element;
 
 use std::{cell::RefCell, rc::Rc, collections::LinkedList, f32::consts::FRAC_PI_2};
-use cgmath::{Rad, Vector3};
+use cgmath::{Rad, Vector2, Vector3};
 use wasm_bindgen::prelude::*;
 use web_sys::{HtmlCanvasElement, js_sys::Date};
 
@@ -25,6 +26,11 @@ const SCENE: &[model::Unfinished] = &[
         Vector3::new(Rad(0.0), Rad(0.0), Rad(0.0)),
         Vector3::new(1.0, 1.0, 1.0)
     )
+];
+
+const SCENE_2D: &[gui_element::Unfinished] = &[
+    ("gjqyp visi good?", Vector2::new(0.0, 0.0), 100.0, "IBMPlexSans.ttf"),
+    ("gjqyp visi good?", Vector2::new(400.0, 400.0), 50.0, "JetBrainsMono-Medium.ttf"),
 ];
 
 #[repr(C)]
@@ -51,6 +57,7 @@ struct PortfolioApp {
     keyboard_input: Rc<RefCell<systems::KeyboardInput>>,
     mouse_input: Rc<RefCell<systems::MouseInput>>,
     meshes: Rc<RefCell<LinkedList<model::Finished>>>,
+    gui_elements: Rc<RefCell<LinkedList<gui_element::Finished>>>,
 }
 
 impl PortfolioApp {
@@ -59,7 +66,8 @@ impl PortfolioApp {
             renderer: Rc::new(RefCell::new(renderer::Renderer::new(canvas).await.expect("Can't get the WebGPU instance!"))),
             keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
             mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
-            meshes: Rc::new(RefCell::new(LinkedList::new()))
+            meshes: Rc::new(RefCell::new(LinkedList::new())),
+            gui_elements: Rc::new(RefCell::new(LinkedList::new())),
         }
     }
 
@@ -67,7 +75,12 @@ impl PortfolioApp {
         for mesh in unfinished_meshes {
             self.meshes.borrow_mut().append(&mut self.renderer.borrow_mut().load_models(*mesh).await);
         }
+    }
 
+    async fn initialize_gui_elements(&mut self, unfinished_gui_elements: &[gui_element::Unfinished]) {
+        for element in unfinished_gui_elements {
+            self.gui_elements.borrow_mut().append(&mut self.renderer.borrow_mut().load_2d_element(*element).await);
+        }
     }
 
     fn update(&self, dt: f64) {
@@ -105,7 +118,7 @@ impl PortfolioApp {
         renderer.update_clock(dt);
         renderer.render_skybox(&mut encoder).unwrap();
         renderer.render_meshes(&self.meshes.borrow(), &mut encoder).unwrap();
-        renderer.render_gui(&mut encoder).unwrap();
+        renderer.render_gui(&self.gui_elements.borrow(), &mut encoder).unwrap();
         renderer.render_postproc(&mut encoder, &fb_view).unwrap();
         renderer.queue.submit(Some(encoder.finish()));
         renderer.queue.present(frame);
@@ -122,6 +135,7 @@ pub async fn main() -> Result<(), JsValue> {
 
     let mut app = PortfolioApp::new(canvas).await;
     app.initialize_models(SCENE).await;
+    app.initialize_gui_elements(SCENE_2D).await;
 
     //on resize
     {
