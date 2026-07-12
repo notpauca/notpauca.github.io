@@ -93,7 +93,7 @@ impl Finished {
                 view_formats: &[],
             });
 
-            // let texture_view = image_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            // let texture_view = image_texture.create_view(&Default::default());
             let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
