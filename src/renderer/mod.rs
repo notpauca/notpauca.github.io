@@ -86,7 +86,7 @@ impl Renderer {
 
         let pre_postproc_texture_bind_group_layout = device.create_bind_group_layout(&consts::bind_group_layouts::TEXTURE);
 
-        let pre_postproc_texture = texture::DrawTo::new(&device, config.width, config.height, &pre_postproc_texture_bind_group_layout);
+        let pre_postproc_texture = texture::DrawTo::new(&device, config.width, config.height, &pre_postproc_texture_bind_group_layout, config.format);
 
         surface.configure(
             &device,
@@ -402,7 +402,7 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
 
-        self.pre_postproc_texture = texture::DrawTo::new(&self.device, width, height, &self.pre_postproc_texture_bind_group_layout);
+        self.pre_postproc_texture = texture::DrawTo::new(&self.device, width, height, &self.pre_postproc_texture_bind_group_layout, self.config.format);
 
         self.queue.write_buffer(&self.screen_size_buffer, 0, bytemuck::cast_slice(&[width, height]));
 
