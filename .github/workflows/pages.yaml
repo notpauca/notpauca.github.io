@@ -1,0 +1,47 @@
+name: deploy
+on:
+  push:
+    [master, wgpu-rewrite]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+      - name: Build
+        run: wasm-pack build --release --target web
+      - name: Prep site
+        run: | 
+          mkdir site
+          cp index.html site/index.html
+          cp -r pkg/ site/pkg/
+          cp -r assets/ site/assets/ 
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'site/'
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

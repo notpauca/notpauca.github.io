@@ -64,8 +64,8 @@ impl PortfolioApp {
     async fn new(canvas: HtmlCanvasElement) -> Self {
         Self {
             renderer: Rc::new(RefCell::new(renderer::Renderer::new(canvas).await.expect("Can't get the WebGPU instance!"))),
-            keyboard_input: Rc::new(RefCell::new(systems::KeyboardInput::default())),
-            mouse_input: Rc::new(RefCell::new(systems::MouseInput::default())),
+            keyboard_input: Rc::new(RefCell::new(Default::default())),
+            mouse_input: Rc::new(RefCell::new(Default::default())),
             meshes: Rc::new(RefCell::new(LinkedList::new())),
             gui_elements: Rc::new(RefCell::new(LinkedList::new())),
         }
@@ -113,7 +113,7 @@ impl PortfolioApp {
         };
 
         let fb_view = frame.texture.create_view(&Default::default());
-        let mut encoder = renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut encoder = renderer.device.create_command_encoder(&Default::default());
 
         renderer.update_clock(dt);
         renderer.render_skybox(&mut encoder).unwrap();
