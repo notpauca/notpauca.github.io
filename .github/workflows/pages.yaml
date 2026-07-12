@@ -30,7 +30,11 @@ jobs:
         run: | 
           mkdir site
           cp index.html site/index.html
+          cp styles.css site/styles.css
+          cp favicon.gif site/favicon.gif
           cp -r pkg site/pkg
+          mkdir site/src
+          cp -r src/shader site/src/shader
           cp -r assets/ site/assets/
       - uses: actions/upload-pages-artifact@v3
         with:
